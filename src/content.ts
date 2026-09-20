@@ -1,7 +1,8 @@
 export const TREND_QUERIES = [
-  'ChatGPT', 'OpenAI', 'автоматизация', 'AI агент', 'ИИ агент', 'нейросеть',
-  'бизнес', 'чат-бот', 'продажи', 'CRM', 'Gemini', 'Claude',
-  'AI бизнес', 'ИИ для бизнеса', 'AI', 'ИИ'
+  'AI агент для бизнеса', 'ИИ агент для бизнеса', 'чат-бот для бизнеса', 'автоматизация бизнеса',
+  'автоматизация продаж', 'автоматизация заявок', 'CRM автоматизация', 'бот для заявок',
+  'автоматизация поддержки', 'автоматизация записи', 'WhatsApp автоматизация', 'Telegram бот для бизнеса',
+  'ИИ для отдела продаж', 'AI для продаж', 'клиентский сервис AI', 'автоматизация рутины'
 ] as const;
 
 export interface TrendEvidence {
@@ -27,6 +28,6 @@ export function selectTrendQueries(cursor:number,count=4):string[]{
 export function formatTrendEvidence(rows:TrendEvidence[]):string{
   return rows
     .sort((a,b)=>a.query.localeCompare(b.query)||a.type.localeCompare(b.type)||a.rank-b.rank)
-    .map(x=>`[${x.query} | ${x.type} #${x.rank} | ${x.timestamp}] @${x.username}: ${x.text.slice(0,420)}`)
-    .join('\n');
+    .map(x=>'['+x.query+' | '+x.type+' #'+x.rank+' | '+x.timestamp+'] @'+x.username+': '+x.text.slice(0,420))
+    .join('\\n');
 }

@@ -14,11 +14,9 @@ const int = (key: string, fallback: number, min: number, max: number): number =>
 };
 
 export const DEFAULT_SEARCH_QUERIES = [
-  'нужен чат бот', 'ищу разработчика бота', 'нужен AI агент', 'нужен ИИ агент',
-  'нужна автоматизация', 'как автоматизировать заявки', 'теряем заявки',
-  'менеджеры не успевают отвечать', 'бот для Telegram', 'бот для бизнеса',
-  'автоматизация CRM', 'AI для бизнеса', 'ии для бизнеса', 'чат бот керек',
-  'автоматтандыру керек', 'әзірлеуші керек'
+  'нужен бот','нужен агент','ищу разработчика','AI агент','ИИ агент',
+  'чат бот','автоматизация бизнеса','автоматизация заявок','теряем заявки',
+  'автоматизация CRM','AI бизнес','әзірлеуші керек','автоматтандыру керек'
 ] as const;
 
 export function loadConfig() {
@@ -33,6 +31,10 @@ export function loadConfig() {
       token: required('THREADS_ACCESS_TOKEN'),
       baseUrl: optional('THREADS_API_BASE_URL', 'https://graph.threads.net').replace(/\/$/, '')
     },
+    socialCrawl: {
+      apiKey: optional('SOCIALCRAWL_API_KEY'),
+      baseUrl: optional('SOCIALCRAWL_BASE_URL','https://www.socialcrawl.dev').replace(/\/$/,'')
+    },
     llm: {
       key: required('OPENAI_API_KEY'),
       baseUrl: optional('OPENAI_BASE_URL', 'https://api.openai.com/v1').replace(/\/$/, ''),
@@ -40,10 +42,10 @@ export function loadConfig() {
       webSearchModel: optional('OPENAI_WEB_SEARCH_MODEL', model)
     },
     mode: modeRaw as AgentMode,
-    hunterIntervalMs: int('HUNTER_INTERVAL_SECONDS', 900, 60, 3600) * 1000,
+    hunterIntervalMs: int('HUNTER_INTERVAL_SECONDS', 3600, 60, 3600) * 1000,
     inboundIntervalMs: int('INBOUND_INTERVAL_SECONDS', 90, 60, 3600) * 1000,
     contentIntervalMs: int('CONTENT_INTERVAL_HOURS', 4, 1, 24) * 3600_000,
-    trendQueriesPerCycle: int('TREND_QUERIES_PER_CYCLE', 4, 2, 8),
+    trendQueriesPerCycle: int('TREND_QUERIES_PER_CYCLE', 2, 1, 4),
     minLeadScore: int('MIN_LEAD_SCORE', 55, 1, 100),
     maxPerHour: int('MAX_OUTREACH_PER_HOUR', 3, 1, 50),
     maxPerDay: int('MAX_OUTREACH_PER_DAY', 10, 1, 200),

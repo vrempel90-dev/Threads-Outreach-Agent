@@ -2,12 +2,14 @@ import type { Config } from './config.js';
 import { Database } from './db.js';
 import { ThreadsClient } from './threads.js';
 import { LlmClient } from './llm.js';
+import { SocialCrawlClient, type SocialCrawlPost } from './socialcrawl.js';
 import { OwnerNotifier } from './notifier.js';
 import { scorePost,isHotIntent,isOptOut } from './scoring.js';
 import { contentSlot, selectTrendQueries, formatTrendEvidence, type TrendEvidence } from './content.js';
 import type { ThreadsPost } from './types.js';
 
 const sleep=(ms:number,signal:AbortSignal)=>new Promise<void>(resolve=>{if(signal.aborted)return resolve();const t=setTimeout(done,ms);function done(){clearTimeout(t);signal.removeEventListener('abort',done);resolve()}signal.addEventListener('abort',done,{once:true})});
+const virality=(p:SocialCrawlPost)=>p.likes+p.replies*2+p.shares*3+p.reposts*3+p.quotes*3;
 
 export class OutreachAgent {
   private queryCursor=0;
@@ -19,9 +21,16 @@ export class OutreachAgent {
   lastError:string|null=null;
   publicDiscoveryHealthy:boolean|null=null;
   discoveryIssue:string|null=null;
-  discoverySource='openai_web_search';
+  discoverySource='socialcrawl_threads_search';
 
-  constructor(readonly config:Config,readonly db:Database,readonly threads:ThreadsClient,readonly llm:LlmClient,readonly notifier:OwnerNotifier){}
+  constructor(
+    readonly config:Config,
+    readonly db:Database,
+    readonly threads:ThreadsClient,
+    readonly llm:LlmClient,
+    readonly socialCrawl:SocialCrawlClient,
+    readonly notifier:OwnerNotifier
+  ){}
 
   async start(signal:AbortSignal){
     const p=await this.threads.profile(); this.ownUsername=p.username.toLowerCase();
@@ -31,6 +40,11 @@ export class OutreachAgent {
       const threadScopes=scopes.filter(s=>s.startsWith('threads_')).sort();
       console.log(JSON.stringify({level:'info',event:'threads_token_scopes',scopes:threadScopes}));
     }
+    if(!this.socialCrawl.enabled){
+      this.publicDiscoveryHealthy=false;
+      this.discoveryIssue='SOCIALCRAWL_API_KEY_REQUIRED';
+      console.warn(JSON.stringify({level:'warn',event:'socialcrawl_not_configured'}));
+    }
     return Promise.all([
       this.loop('hunter',this.config.hunterIntervalMs,signal,()=>this.hunterOnce()),
       this.loop('inbound',this.config.inboundIntervalMs,signal,()=>this.inboundOnce()),
@@ -38,52 +52,63 @@ export class OutreachAgent {
       this.loop('content',Math.min(this.config.contentIntervalMs,300_000),signal,()=>this.contentOnce())
     ]);
   }
+
   private async loop(name:string,interval:number,signal:AbortSignal,fn:()=>Promise<void>){
     while(!signal.aborted){
       try{await fn();this.lastError=null}catch(e){this.lastError=e instanceof Error?e.message:'UNKNOWN';console.error(JSON.stringify({level:'error',worker:name,code:this.lastError}));}
       await sleep(interval,signal);
     }
   }
+
   private allowedByRate(username:string){return Promise.all([this.db.sentCount(1),this.db.sentCount(24),this.db.recentContact(username,this.config.userCooldownDays)]).then(([hour,day,recent])=>!recent&&hour<this.config.maxPerHour&&day<this.config.maxPerDay);}
 
   async hunterOnce(){
+    if(!this.socialCrawl.enabled){
+      this.publicDiscoveryHealthy=false;
+      this.discoveryIssue='SOCIALCRAWL_API_KEY_REQUIRED';
+      this.lastHunterAt=new Date().toISOString();
+      console.warn(JSON.stringify({level:'warn',event:'hunter_skipped',reason:this.discoveryIssue}));
+      return;
+    }
     const query=this.config.queries[this.queryCursor++%this.config.queries.length]!;
-    let signals;
+    let posts:SocialCrawlPost[];
     try{
-      signals=await this.llm.webThreadSignals([query],'lead',8);
+      posts=await this.socialCrawl.search(query,14);
       this.publicDiscoveryHealthy=true;
-      this.discoveryIssue=signals.length?'': 'WEB_SEARCH_NO_MATCHES';
+      this.discoveryIssue=posts.length?'':'NO_MATCHES_THIS_QUERY';
     }catch(e){
       this.publicDiscoveryHealthy=false;
-      this.discoveryIssue=e instanceof Error?e.message:'OPENAI_WEB_SEARCH_FAILED';
+      this.discoveryIssue=e instanceof Error?e.message:'SOCIALCRAWL_FAILED';
       throw e;
     }
+
     let candidates=0,drafted=0,resolved=0,discoveredOnly=0;
-    for(const signal of signals){
-      if(signal.username.toLowerCase()===this.ownUsername)continue;
-      const resolvedPost=await this.threads.resolvePermalink(signal.url);
-      const seenKey=resolvedPost?.id??`web:${signal.url}`;
-      if(await this.db.seen(seenKey))continue;
-      await this.db.markSeen(seenKey);
-      if(await this.db.blocked(signal.username))continue;
-      const text=resolvedPost?.text||signal.text;
-      const scored=scorePost(text,this.config.minLeadScore);
+    for(const post of posts){
+      if(post.username.toLowerCase()===this.ownUsername||await this.db.seen(post.id))continue;
+      await this.db.markSeen(post.id);
+      if(await this.db.blocked(post.username))continue;
+      const scored=scorePost(post.text,this.config.minLeadScore);
       if(!scored.shouldEngage)continue;
       candidates++;
-      const postId=resolvedPost?.id;
-      const permalink=resolvedPost?.permalink||signal.url;
-      const username=resolvedPost?.username||signal.username;
-      await this.db.upsertLead({username,score:scored.score,stage:scored.score>=80?'QUALIFIED':'WARM',sourcePostId:postId,sourcePermalink:permalink,lastMessage:text});
-      console.log(JSON.stringify({level:'info',event:'web_lead_found',query,username,score:scored.score,resolved:Boolean(postId),permalink}));
-      if(!postId){discoveredOnly++;continue;}
+
+      const official=await this.threads.resolveCandidate(post.id,post.permalink);
+      const sourcePostId=official?.id??post.id;
+      const permalink=official?.permalink||post.permalink;
+      const username=official?.username||post.username;
+      const text=official?.text||post.text;
+
+      await this.db.upsertLead({username,score:scored.score,stage:scored.score>=80?'QUALIFIED':'WARM',sourcePostId,sourcePermalink:permalink,lastMessage:text});
+      console.log(JSON.stringify({level:'info',event:'lead_found',source:'socialcrawl',query,username,score:scored.score,officiallyResolved:Boolean(official),permalink}));
+
+      if(!official){discoveredOnly++;continue;}
       resolved++;
       if(!await this.allowedByRate(username))continue;
       const reply=await this.llm.outreach(text,scored.language);
-      await this.db.createOutreach({kind:'REPLY',username,sourcePostId:postId,sourcePermalink:permalink,sourceText:text,text:reply,score:scored.score,status:this.config.mode==='autonomous'?'QUEUED':'DRAFT'});
+      await this.db.createOutreach({kind:'REPLY',username,sourcePostId:official.id,sourcePermalink:permalink,sourceText:text,text:reply,score:scored.score,status:this.config.mode==='autonomous'?'QUEUED':'DRAFT'});
       drafted++;
     }
     this.lastHunterAt=new Date().toISOString();
-    console.log(JSON.stringify({level:'info',event:'hunter_cycle',source:'openai_web_search',query,signals:signals.length,candidates,resolved,discoveredOnly,drafted,mode:this.config.mode}));
+    console.log(JSON.stringify({level:'info',event:'hunter_cycle',source:'socialcrawl',query,posts:posts.length,candidates,resolved,discoveredOnly,drafted,creditsRemaining:this.socialCrawl.lastCreditsRemaining,mode:this.config.mode}));
   }
 
   private async handleInbound(post:ThreadsPost,parentId:string,context:string){
@@ -127,42 +152,52 @@ export class OutreachAgent {
   }
 
   private async collectTrendEvidence():Promise<TrendEvidence[]>{
+    if(!this.socialCrawl.enabled)return [];
     const queries=selectTrendQueries(this.trendCursor,this.config.trendQueriesPerCycle);
     this.trendCursor=(this.trendCursor+this.config.trendQueriesPerCycle)%16;
-    const signals=await this.llm.webThreadSignals(queries,'trend',14);
-    console.log(JSON.stringify({level:'info',event:'trend_web_search',queries:queries.length,signals:signals.length}));
-    return signals.map((s,idx):TrendEvidence=>({
-      query:s.query,
-      type:'RECENT',
-      rank:idx+1,
-      text:s.text,
-      username:s.username,
-      timestamp:s.timestamp||new Date().toISOString(),
-      permalink:s.url
+    const groups=await Promise.all(queries.map(async query=>{
+      const posts=await this.socialCrawl.search(query,7);
+      return posts
+        .filter(p=>p.username.toLowerCase()!==this.ownUsername)
+        .sort((a,b)=>virality(b)-virality(a))
+        .slice(0,8)
+        .map((p,idx):TrendEvidence=>({
+          query,type:'TOP',rank:idx+1,
+          text:`[likes=${p.likes} replies=${p.replies} shares=${p.shares} reposts=${p.reposts} quotes=${p.quotes}] ${p.text}`,
+          username:p.username,timestamp:p.timestamp,permalink:p.permalink
+        }));
     }));
+    const seen=new Set<string>(),out:TrendEvidence[]=[];
+    for(const row of groups.flat()){
+      if(!row.text.trim()||seen.has(row.permalink))continue;
+      seen.add(row.permalink);out.push(row);
+    }
+    console.log(JSON.stringify({level:'info',event:'trend_socialcrawl',queries:queries.length,evidence:out.length,creditsRemaining:this.socialCrawl.lastCreditsRemaining}));
+    return out;
   }
 
   async contentOnce(){
     const hours=Math.max(1,Math.round(this.config.contentIntervalMs/3600_000));
     const slot=contentSlot(new Date(),hours);
-    if(await this.db.getState('content_slot')===slot)return;
-    let evidence:TrendEvidence[];
-    try{
-      evidence=await this.collectTrendEvidence();
-    }catch(e){
-      console.error(JSON.stringify({level:'error',event:'trend_web_search_failed',code:e instanceof Error?e.message:'UNKNOWN'}));
+    if(await this.db.getState('content_slot')===slot||await this.db.getState('content_attempt_slot')===slot)return;
+    await this.db.setState('content_attempt_slot',slot);
+    if(!this.socialCrawl.enabled){
+      console.warn(JSON.stringify({level:'warn',event:'content_skipped',reason:'SOCIALCRAWL_API_KEY_REQUIRED'}));
       return;
     }
+    let evidence:TrendEvidence[];
+    try{evidence=await this.collectTrendEvidence();}
+    catch(e){console.error(JSON.stringify({level:'error',event:'trend_socialcrawl_failed',code:e instanceof Error?e.message:'UNKNOWN'}));return;}
+
     const queries=new Set(evidence.map(x=>x.query)).size;
-    const fresh=evidence.length;
-    if(evidence.length<6||queries<2||fresh<4){
-      console.log(JSON.stringify({level:'info',event:'viral_retry_weak_evidence',slot,evidence:evidence.length,queries,fresh}));
+    if(evidence.length<6||queries<2){
+      console.log(JSON.stringify({level:'info',event:'viral_skip_weak_evidence',slot,evidence:evidence.length,queries}));
       return;
     }
     const evidenceText=formatTrendEvidence(evidence).slice(0,14000);
     const draft=await this.llm.viralContent(evidenceText);
     if(draft.confidence<70){
-      console.log(JSON.stringify({level:'info',event:'viral_retry_low_confidence',slot,theme:draft.theme,confidence:draft.confidence}));
+      console.log(JSON.stringify({level:'info',event:'viral_skip_low_confidence',slot,theme:draft.theme,confidence:draft.confidence}));
       return;
     }
     await this.db.createOutreach({kind:'CONTENT',sourceText:evidenceText,text:draft.text,score:draft.confidence,status:this.config.mode==='autonomous'?'QUEUED':'DRAFT'});

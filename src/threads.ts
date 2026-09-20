@@ -51,6 +51,16 @@ export class ThreadsClient {
     const x=await this.call('/profile_posts',{username,fields:'id,text,username,permalink,timestamp',limit:String(Math.max(1,Math.min(50,limit)))});
     return Array.isArray(x?.data)?x.data.map((v:any)=>this.post(v)).filter(Boolean) as ThreadsPost[]:[];
   }
+  async resolveCandidate(id:string,permalink:string):Promise<ThreadsPost|null>{
+    if(id){
+      try{
+        const x=await this.call(`/${encodeURIComponent(id)}`,{fields:'id,text,username,permalink,timestamp'});
+        const p=this.post(x);
+        if(p)return p;
+      }catch{}
+    }
+    return this.resolvePermalink(permalink);
+  }
   async resolvePermalink(permalink:string):Promise<ThreadsPost|null>{
     const username=usernameFromPermalink(permalink);
     if(!username)return null;

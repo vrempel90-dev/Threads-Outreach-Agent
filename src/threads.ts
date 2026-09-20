@@ -7,7 +7,10 @@ export class ThreadsApiError extends Error {
 const normalizePermalink=(raw:string):string=>{
   try{
     const u=new URL(raw);
-    return `${u.hostname.toLowerCase().replace(/^www\./,'')}${u.pathname.replace(/\/+$/,'')}`;
+    const host=u.hostname.toLowerCase().replace(/^www\./,'');
+    const path=u.pathname.replace(/\/+$/,'');
+    if(host==='threads.com'||host==='threads.net')return `threads${path}`;
+    return `${host}${path}`;
   }catch{return raw.trim().replace(/\/+$/,'');}
 };
 

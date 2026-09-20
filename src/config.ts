@@ -49,7 +49,8 @@ export function loadConfig() {
     queries: queries.length ? queries : [...DEFAULT_SEARCH_QUERIES],
     telegram: {
       token: optional('OWNER_TELEGRAM_BOT_TOKEN'),
-      chatId: optional('OWNER_TELEGRAM_CHAT_ID')
+      chatId: optional('OWNER_TELEGRAM_CHAT_ID'),
+      bindCode: optional('TELEGRAM_BIND_CODE')
     },
     dashboardToken: optional('DASHBOARD_TOKEN')
   });

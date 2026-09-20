@@ -4,6 +4,20 @@ export class ThreadsApiError extends Error {
   constructor(readonly code:string, readonly status:number){ super(code); }
 }
 
+const normalizePermalink=(raw:string):string=>{
+  try{
+    const u=new URL(raw);
+    return `${u.hostname.toLowerCase().replace(/^www\./,'')}${u.pathname.replace(/\/+$/,'')}`;
+  }catch{return raw.trim().replace(/\/+$/,'');}
+};
+
+const usernameFromPermalink=(raw:string):string=>{
+  try{
+    const m=new URL(raw).pathname.match(/\/@([^/]+)\/post\//u);
+    return m?.[1]?decodeURIComponent(m[1]):'';
+  }catch{return '';}
+};
+
 export class ThreadsClient {
   constructor(private readonly token:string, private readonly baseUrl:string) {}
   private async call(path:string, params:Record<string,string>={}, method:'GET'|'POST'='GET'){
@@ -32,6 +46,19 @@ export class ThreadsClient {
   async search(query:string,searchType:'RECENT'|'TOP'='RECENT',limit=25):Promise<ThreadsPost[]>{
     const x=await this.call('/keyword_search',{q:query,search_type:searchType,search_mode:'KEYWORD',fields:'id,text,username,permalink,timestamp',limit:String(Math.max(1,Math.min(50,limit)))});
     return Array.isArray(x?.data)?x.data.map((v:any)=>this.post(v)).filter(Boolean) as ThreadsPost[]:[];
+  }
+  async profilePosts(username:string,limit=50):Promise<ThreadsPost[]>{
+    const x=await this.call('/profile_posts',{username,fields:'id,text,username,permalink,timestamp',limit:String(Math.max(1,Math.min(50,limit)))});
+    return Array.isArray(x?.data)?x.data.map((v:any)=>this.post(v)).filter(Boolean) as ThreadsPost[]:[];
+  }
+  async resolvePermalink(permalink:string):Promise<ThreadsPost|null>{
+    const username=usernameFromPermalink(permalink);
+    if(!username)return null;
+    try{
+      const target=normalizePermalink(permalink);
+      const posts=await this.profilePosts(username,50);
+      return posts.find(p=>normalizePermalink(p.permalink)===target)??null;
+    }catch{return null;}
   }
   async mentions():Promise<ThreadsPost[]>{
     const x=await this.call('/me/mentions',{fields:'id,text,username,permalink,timestamp',limit:'50'});

@@ -19,6 +19,7 @@ export class OutreachAgent {
   lastError:string|null=null;
   publicDiscoveryHealthy:boolean|null=null;
   discoveryIssue:string|null=null;
+  discoverySource='openai_web_search';
 
   constructor(readonly config:Config,readonly db:Database,readonly threads:ThreadsClient,readonly llm:LlmClient,readonly notifier:OwnerNotifier){}
 
@@ -28,12 +29,7 @@ export class OutreachAgent {
     const scopes=await this.threads.debugScopes();
     if(scopes){
       const threadScopes=scopes.filter(s=>s.startsWith('threads_')).sort();
-      const hasKeyword=threadScopes.includes('threads_keyword_search');
-      console.log(JSON.stringify({level:'info',event:'threads_token_scopes',scopes:threadScopes,hasKeywordSearch:hasKeyword}));
-      if(!hasKeyword){
-        this.publicDiscoveryHealthy=false;
-        this.discoveryIssue='THREADS_KEYWORD_SEARCH_PERMISSION_MISSING';
-      }
+      console.log(JSON.stringify({level:'info',event:'threads_token_scopes',scopes:threadScopes}));
     }
     return Promise.all([
       this.loop('hunter',this.config.hunterIntervalMs,signal,()=>this.hunterOnce()),
@@ -52,32 +48,42 @@ export class OutreachAgent {
 
   async hunterOnce(){
     const query=this.config.queries[this.queryCursor++%this.config.queries.length]!;
-    const posts=await this.threads.search(query,'RECENT',25);
-    const externalPosts=posts.filter(p=>p.username.toLowerCase()!==this.ownUsername);
-    if(posts.length>0&&externalPosts.length===0){
-      this.publicDiscoveryHealthy=false;
-      this.discoveryIssue='THREADS_KEYWORD_SEARCH_OWN_ONLY';
-      console.warn(JSON.stringify({level:'warn',event:'public_discovery_unavailable',query,posts:posts.length,own:posts.length}));
-    }else if(externalPosts.length>0){
+    let signals;
+    try{
+      signals=await this.llm.webThreadSignals([query],'lead',8);
       this.publicDiscoveryHealthy=true;
-      this.discoveryIssue=null;
+      this.discoveryIssue=signals.length?'': 'WEB_SEARCH_NO_MATCHES';
+    }catch(e){
+      this.publicDiscoveryHealthy=false;
+      this.discoveryIssue=e instanceof Error?e.message:'OPENAI_WEB_SEARCH_FAILED';
+      throw e;
     }
-    let candidates=0,drafted=0;
-    for(const post of externalPosts){
-      if(await this.db.seen(post.id))continue;
-      await this.db.markSeen(post.id);
-      if(await this.db.blocked(post.username))continue;
-      const scored=scorePost(post.text,this.config.minLeadScore);
+    let candidates=0,drafted=0,resolved=0,discoveredOnly=0;
+    for(const signal of signals){
+      if(signal.username.toLowerCase()===this.ownUsername)continue;
+      const resolvedPost=await this.threads.resolvePermalink(signal.url);
+      const seenKey=resolvedPost?.id??`web:${signal.url}`;
+      if(await this.db.seen(seenKey))continue;
+      await this.db.markSeen(seenKey);
+      if(await this.db.blocked(signal.username))continue;
+      const text=resolvedPost?.text||signal.text;
+      const scored=scorePost(text,this.config.minLeadScore);
       if(!scored.shouldEngage)continue;
       candidates++;
-      await this.db.upsertLead({username:post.username,score:scored.score,stage:scored.score>=80?'QUALIFIED':'WARM',sourcePostId:post.id,sourcePermalink:post.permalink,lastMessage:post.text});
-      if(!await this.allowedByRate(post.username))continue;
-      const reply=await this.llm.outreach(post.text,scored.language);
-      await this.db.createOutreach({kind:'REPLY',username:post.username,sourcePostId:post.id,sourcePermalink:post.permalink,sourceText:post.text,text:reply,score:scored.score,status:this.config.mode==='autonomous'?'QUEUED':'DRAFT'});
+      const postId=resolvedPost?.id;
+      const permalink=resolvedPost?.permalink||signal.url;
+      const username=resolvedPost?.username||signal.username;
+      await this.db.upsertLead({username,score:scored.score,stage:scored.score>=80?'QUALIFIED':'WARM',sourcePostId:postId,sourcePermalink:permalink,lastMessage:text});
+      console.log(JSON.stringify({level:'info',event:'web_lead_found',query,username,score:scored.score,resolved:Boolean(postId),permalink}));
+      if(!postId){discoveredOnly++;continue;}
+      resolved++;
+      if(!await this.allowedByRate(username))continue;
+      const reply=await this.llm.outreach(text,scored.language);
+      await this.db.createOutreach({kind:'REPLY',username,sourcePostId:postId,sourcePermalink:permalink,sourceText:text,text:reply,score:scored.score,status:this.config.mode==='autonomous'?'QUEUED':'DRAFT'});
       drafted++;
     }
     this.lastHunterAt=new Date().toISOString();
-    console.log(JSON.stringify({level:'info',event:'hunter_cycle',query,posts:posts.length,candidates,drafted,mode:this.config.mode}));
+    console.log(JSON.stringify({level:'info',event:'hunter_cycle',source:'openai_web_search',query,signals:signals.length,candidates,resolved,discoveredOnly,drafted,mode:this.config.mode}));
   }
 
   private async handleInbound(post:ThreadsPost,parentId:string,context:string){
@@ -110,7 +116,9 @@ export class OutreachAgent {
     if(this.config.mode!=='autonomous')return;
     for(const row of await this.db.pending(5)){
       try{
-        const externalId=await this.threads.publish(String(row.text),row.kind==='REPLY'?String(row.source_post_id):undefined);
+        const sourceId=row.kind==='REPLY'&&row.source_post_id?String(row.source_post_id):undefined;
+        if(row.kind==='REPLY'&&!sourceId){await this.db.markFailed(String(row.id),'REPLY_SOURCE_ID_MISSING');continue;}
+        const externalId=await this.threads.publish(String(row.text),sourceId);
         await this.db.markSent(String(row.id),externalId);
         console.log(JSON.stringify({level:'info',event:'threads_sent',kind:row.kind,id:row.id,externalId}));
         if(row.kind==='CONTENT') await this.notifier.send(`🚀 Threads post published\n${row.text}`);
@@ -121,42 +129,33 @@ export class OutreachAgent {
   private async collectTrendEvidence():Promise<TrendEvidence[]>{
     const queries=selectTrendQueries(this.trendCursor,this.config.trendQueriesPerCycle);
     this.trendCursor=(this.trendCursor+this.config.trendQueriesPerCycle)%16;
-    const now=Date.now();
-    const groups=await Promise.all(queries.flatMap(query=>(['TOP','RECENT'] as const).map(async type=>{
-      const posts=await this.threads.search(query,type,10);
-      const own=posts.filter(p=>p.username.toLowerCase()===this.ownUsername).length;
-      const nonEmptyText=posts.filter(p=>p.text.trim().length>0).length;
-      const fresh=posts.filter(p=>Number.isFinite(Date.parse(p.timestamp))&&now-Date.parse(p.timestamp)<=72*3600_000).length;
-      if(posts.length>0&&own===posts.length){
-        this.publicDiscoveryHealthy=false;
-        this.discoveryIssue='THREADS_KEYWORD_SEARCH_OWN_ONLY';
-      }else if(posts.length>own){
-        this.publicDiscoveryHealthy=true;
-        this.discoveryIssue=null;
-      }
-      console.log(JSON.stringify({level:'info',event:'trend_search',query,type,posts:posts.length,own,nonEmptyText,fresh}));
-      return posts
-        .filter(p=>p.username.toLowerCase()!==this.ownUsername)
-        .filter(p=>type==='TOP'||now-Date.parse(p.timestamp)<=72*3600_000)
-        .slice(0,8)
-        .map((p,idx):TrendEvidence=>({query,type,rank:idx+1,text:p.text,username:p.username,timestamp:p.timestamp,permalink:p.permalink}));
-    })));
-    const seen=new Set<string>(),out:TrendEvidence[]=[];
-    for(const row of groups.flat()){
-      if(!row.text.trim()||seen.has(row.text.trim().toLowerCase())) continue;
-      seen.add(row.text.trim().toLowerCase()); out.push(row);
-    }
-    return out;
+    const signals=await this.llm.webThreadSignals(queries,'trend',14);
+    console.log(JSON.stringify({level:'info',event:'trend_web_search',queries:queries.length,signals:signals.length}));
+    return signals.map((s,idx):TrendEvidence=>({
+      query:s.query,
+      type:'RECENT',
+      rank:idx+1,
+      text:s.text,
+      username:s.username,
+      timestamp:s.timestamp||new Date().toISOString(),
+      permalink:s.url
+    }));
   }
 
   async contentOnce(){
     const hours=Math.max(1,Math.round(this.config.contentIntervalMs/3600_000));
     const slot=contentSlot(new Date(),hours);
     if(await this.db.getState('content_slot')===slot)return;
-    const evidence=await this.collectTrendEvidence();
+    let evidence:TrendEvidence[];
+    try{
+      evidence=await this.collectTrendEvidence();
+    }catch(e){
+      console.error(JSON.stringify({level:'error',event:'trend_web_search_failed',code:e instanceof Error?e.message:'UNKNOWN'}));
+      return;
+    }
     const queries=new Set(evidence.map(x=>x.query)).size;
-    const fresh=evidence.filter(x=>x.type==='RECENT').length;
-    if(evidence.length<8||queries<2||fresh<3){
+    const fresh=evidence.length;
+    if(evidence.length<6||queries<2||fresh<4){
       console.log(JSON.stringify({level:'info',event:'viral_retry_weak_evidence',slot,evidence:evidence.length,queries,fresh}));
       return;
     }

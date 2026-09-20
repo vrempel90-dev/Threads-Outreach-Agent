@@ -10,7 +10,7 @@ const config=loadConfig();
 const db=new Database(config.databaseUrl);
 await db.migrate();
 const threads=new ThreadsClient(config.threads.token,config.threads.baseUrl);
-const llm=new LlmClient(config.llm.key,config.llm.baseUrl,config.llm.model);
+const llm=new LlmClient(config.llm.key,config.llm.baseUrl,config.llm.model,config.llm.webSearchModel);
 const notifier=new OwnerNotifier(config.telegram.token,config.telegram.chatId,config.telegram.bindCode,db);
 const agent=new OutreachAgent(config,db,threads,llm,notifier);
 const abort=new AbortController();

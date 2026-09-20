@@ -25,6 +25,7 @@ export function loadConfig() {
   const modeRaw = optional('AGENT_MODE', 'review');
   if (!['review', 'autonomous'].includes(modeRaw)) throw new Error('INVALID_AGENT_MODE');
   const queries = optional('SEARCH_QUERIES').split('|').map(x => x.trim()).filter(Boolean);
+  const model=optional('OPENAI_MODEL', 'gpt-5-mini');
   return Object.freeze({
     port: int('PORT', 3000, 1, 65535),
     databaseUrl: required('DATABASE_URL'),
@@ -35,10 +36,11 @@ export function loadConfig() {
     llm: {
       key: required('OPENAI_API_KEY'),
       baseUrl: optional('OPENAI_BASE_URL', 'https://api.openai.com/v1').replace(/\/$/, ''),
-      model: optional('OPENAI_MODEL', 'gpt-5-mini')
+      model,
+      webSearchModel: optional('OPENAI_WEB_SEARCH_MODEL', model)
     },
     mode: modeRaw as AgentMode,
-    hunterIntervalMs: int('HUNTER_INTERVAL_SECONDS', 180, 60, 3600) * 1000,
+    hunterIntervalMs: int('HUNTER_INTERVAL_SECONDS', 900, 60, 3600) * 1000,
     inboundIntervalMs: int('INBOUND_INTERVAL_SECONDS', 90, 60, 3600) * 1000,
     contentIntervalMs: int('CONTENT_INTERVAL_HOURS', 4, 1, 24) * 3600_000,
     trendQueriesPerCycle: int('TREND_QUERIES_PER_CYCLE', 4, 2, 8),

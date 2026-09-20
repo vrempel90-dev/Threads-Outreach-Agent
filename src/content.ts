@@ -29,5 +29,5 @@ export function formatTrendEvidence(rows:TrendEvidence[]):string{
   return rows
     .sort((a,b)=>a.query.localeCompare(b.query)||a.type.localeCompare(b.type)||a.rank-b.rank)
     .map(x=>'['+x.query+' | '+x.type+' #'+x.rank+' | '+x.timestamp+'] @'+x.username+': '+x.text.slice(0,420))
-    .join('\\n');
+    .join('\n');
 }

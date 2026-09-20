@@ -144,7 +144,7 @@ export class Database {
   async listLeads(limit=100):Promise<LeadRow[]>{ return (await this.pool.query<LeadRow>('SELECT * FROM leads ORDER BY score DESC, updated_at DESC LIMIT $1',[limit])).rows; }
   async listDashboardLeads(limit=30):Promise<LeadRow[]>{
     return (await this.pool.query<LeadRow>(`SELECT * FROM leads
-      WHERE ai_category='buyer' OR stage IN ('HOT','ENGAGED')
+      WHERE (ai_category='buyer' AND search_query IS NOT NULL) OR stage IN ('HOT','ENGAGED')
       ORDER BY CASE stage WHEN 'HOT' THEN 0 WHEN 'ENGAGED' THEN 1 WHEN 'QUALIFIED' THEN 2 ELSE 3 END,
                score DESC, updated_at DESC
       LIMIT $1`,[limit])).rows;

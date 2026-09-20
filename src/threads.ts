@@ -13,7 +13,7 @@ export class ThreadsClient {
     try{
       const res=await fetch(url,{method,signal:controller.signal,redirect:'error',...(method==='POST'?{headers:{'content-type':'application/x-www-form-urlencoded'},body:qs.toString()}:{})});
       const body=await res.json().catch(()=>null) as any;
-      if(!res.ok||body?.error){ const c=String(body?.error?.code??res.status); throw new ThreadsApiError(`THREADS_${c}`,res.status); }
+      if(!res.ok||body?.error){ const code=String(body?.error?.code??res.status); throw new ThreadsApiError(`THREADS_${code}`,res.status); }
       return body;
     } finally { clearTimeout(timer); }
   }
@@ -22,8 +22,8 @@ export class ThreadsClient {
     return {id:x.id,text:typeof x.text==='string'?x.text:'',username:x.username,permalink:typeof x.permalink==='string'?x.permalink:'',timestamp:x.timestamp};
   }
   async profile(){ const x=await this.call('/me',{fields:'id,username'}); if(!x?.id||!x?.username) throw new Error('INVALID_THREADS_PROFILE'); return {id:String(x.id),username:String(x.username)}; }
-  async search(query:string):Promise<ThreadsPost[]>{
-    const x=await this.call('/keyword_search',{q:query,search_type:'RECENT',fields:'id,text,username,permalink,timestamp',limit:'25'});
+  async search(query:string,searchType:'RECENT'|'TOP'='RECENT',limit=25):Promise<ThreadsPost[]>{
+    const x=await this.call('/keyword_search',{q:query,search_type:searchType,search_mode:'KEYWORD',fields:'id,text,username,permalink,timestamp',limit:String(Math.max(1,Math.min(50,limit)))});
     return Array.isArray(x?.data)?x.data.map((v:any)=>this.post(v)).filter(Boolean) as ThreadsPost[]:[];
   }
   async mentions():Promise<ThreadsPost[]>{

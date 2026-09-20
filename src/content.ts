@@ -1,7 +1,7 @@
 export const TREND_QUERIES = [
-  'AI', 'ИИ', 'ChatGPT', 'OpenAI', 'нейросеть', 'нейросети',
-  'автоматизация', 'бизнес', 'чат-бот', 'бот', 'продажи', 'CRM',
-  'Gemini', 'Claude', 'агент', 'AI бизнес'
+  'ChatGPT', 'OpenAI', 'автоматизация', 'AI агент', 'ИИ агент', 'нейросеть',
+  'бизнес', 'чат-бот', 'продажи', 'CRM', 'Gemini', 'Claude',
+  'AI бизнес', 'ИИ для бизнеса', 'AI', 'ИИ'
 ] as const;
 
 export interface TrendEvidence {

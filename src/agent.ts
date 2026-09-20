@@ -4,14 +4,14 @@ import { ThreadsClient } from './threads.js';
 import { LlmClient } from './llm.js';
 import { OwnerNotifier } from './notifier.js';
 import { scorePost,isHotIntent,isOptOut } from './scoring.js';
-import { CONTENT_SEEDS,contentSlot } from './content.js';
+import { contentSlot, selectTrendQueries, formatTrendEvidence, type TrendEvidence } from './content.js';
 import type { ThreadsPost } from './types.js';
 
 const sleep=(ms:number,signal:AbortSignal)=>new Promise<void>(resolve=>{if(signal.aborted)return resolve();const t=setTimeout(done,ms);function done(){clearTimeout(t);signal.removeEventListener('abort',done);resolve()}signal.addEventListener('abort',done,{once:true})});
 
 export class OutreachAgent {
   private queryCursor=0;
-  private seedCursor=0;
+  private trendCursor=0;
   ownUsername='';
   lastHunterAt:string|null=null;
   lastInboundAt:string|null=null;
@@ -40,7 +40,7 @@ export class OutreachAgent {
 
   async hunterOnce(){
     const query=this.config.queries[this.queryCursor++%this.config.queries.length]!;
-    const posts=await this.threads.search(query);
+    const posts=await this.threads.search(query,'RECENT',25);
     let candidates=0,drafted=0;
     for(const post of posts){
       if(post.username.toLowerCase()===this.ownUsername||await this.db.seen(post.id))continue;
@@ -92,19 +92,53 @@ export class OutreachAgent {
         const externalId=await this.threads.publish(String(row.text),row.kind==='REPLY'?String(row.source_post_id):undefined);
         await this.db.markSent(String(row.id),externalId);
         console.log(JSON.stringify({level:'info',event:'threads_sent',kind:row.kind,id:row.id,externalId}));
+        if(row.kind==='CONTENT') await this.notifier.send(`🚀 Threads post published\n${row.text}`);
       }catch(e){const code=e instanceof Error?e.message:'SEND_FAILED';await this.db.markFailed(String(row.id),code);throw e;}
     }
+  }
+
+  private async collectTrendEvidence():Promise<TrendEvidence[]>{
+    const queries=selectTrendQueries(this.trendCursor,this.config.trendQueriesPerCycle);
+    this.trendCursor=(this.trendCursor+this.config.trendQueriesPerCycle)%12;
+    const now=Date.now();
+    const groups=await Promise.all(queries.flatMap(query=>(['TOP','RECENT'] as const).map(async type=>{
+      const posts=await this.threads.search(query,type,10);
+      return posts
+        .filter(p=>p.username.toLowerCase()!==this.ownUsername)
+        .filter(p=>type==='TOP'||now-Date.parse(p.timestamp)<=72*3600_000)
+        .slice(0,8)
+        .map((p,idx):TrendEvidence=>({query,type,rank:idx+1,text:p.text,username:p.username,timestamp:p.timestamp,permalink:p.permalink}));
+    })));
+    const seen=new Set<string>(),out:TrendEvidence[]=[];
+    for(const row of groups.flat()){
+      if(!row.text.trim()||seen.has(row.text.trim().toLowerCase())) continue;
+      seen.add(row.text.trim().toLowerCase()); out.push(row);
+    }
+    return out;
   }
 
   async contentOnce(){
     const hours=Math.max(1,Math.round(this.config.contentIntervalMs/3600_000));
     const slot=contentSlot(new Date(),hours);
     if(await this.db.getState('content_slot')===slot)return;
-    const seed=CONTENT_SEEDS[this.seedCursor++%CONTENT_SEEDS.length]!;
-    const text=await this.llm.content(seed);
-    await this.db.createOutreach({kind:'CONTENT',text,score:0,status:this.config.mode==='autonomous'?'QUEUED':'DRAFT'});
+    const evidence=await this.collectTrendEvidence();
+    const queries=new Set(evidence.map(x=>x.query)).size;
+    const fresh=evidence.filter(x=>x.type==='RECENT').length;
+    if(evidence.length<8||queries<2||fresh<3){
+      await this.db.setState('content_slot',slot);
+      console.log(JSON.stringify({level:'info',event:'viral_skip_weak_evidence',slot,evidence:evidence.length,queries,fresh}));
+      return;
+    }
+    const evidenceText=formatTrendEvidence(evidence).slice(0,14000);
+    const draft=await this.llm.viralContent(evidenceText);
+    if(draft.confidence<70){
+      await this.db.setState('content_slot',slot);
+      console.log(JSON.stringify({level:'info',event:'viral_skip_low_confidence',slot,theme:draft.theme,confidence:draft.confidence}));
+      return;
+    }
+    await this.db.createOutreach({kind:'CONTENT',sourceText:evidenceText,text:draft.text,score:draft.confidence,status:this.config.mode==='autonomous'?'QUEUED':'DRAFT'});
     await this.db.setState('content_slot',slot);
     this.lastContentAt=new Date().toISOString();
-    console.log(JSON.stringify({level:'info',event:'content_drafted',slot,mode:this.config.mode}));
+    console.log(JSON.stringify({level:'info',event:'viral_content_drafted',slot,theme:draft.theme,confidence:draft.confidence,evidence:evidence.length,mode:this.config.mode}));
   }
 }

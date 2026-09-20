@@ -99,10 +99,11 @@ export class OutreachAgent {
 
   private async collectTrendEvidence():Promise<TrendEvidence[]>{
     const queries=selectTrendQueries(this.trendCursor,this.config.trendQueriesPerCycle);
-    this.trendCursor=(this.trendCursor+this.config.trendQueriesPerCycle)%12;
+    this.trendCursor=(this.trendCursor+this.config.trendQueriesPerCycle)%16;
     const now=Date.now();
     const groups=await Promise.all(queries.flatMap(query=>(['TOP','RECENT'] as const).map(async type=>{
       const posts=await this.threads.search(query,type,10);
+      console.log(JSON.stringify({level:'info',event:'trend_search',query,type,posts:posts.length}));
       return posts
         .filter(p=>p.username.toLowerCase()!==this.ownUsername)
         .filter(p=>type==='TOP'||now-Date.parse(p.timestamp)<=72*3600_000)
@@ -125,15 +126,13 @@ export class OutreachAgent {
     const queries=new Set(evidence.map(x=>x.query)).size;
     const fresh=evidence.filter(x=>x.type==='RECENT').length;
     if(evidence.length<8||queries<2||fresh<3){
-      await this.db.setState('content_slot',slot);
-      console.log(JSON.stringify({level:'info',event:'viral_skip_weak_evidence',slot,evidence:evidence.length,queries,fresh}));
+      console.log(JSON.stringify({level:'info',event:'viral_retry_weak_evidence',slot,evidence:evidence.length,queries,fresh}));
       return;
     }
     const evidenceText=formatTrendEvidence(evidence).slice(0,14000);
     const draft=await this.llm.viralContent(evidenceText);
     if(draft.confidence<70){
-      await this.db.setState('content_slot',slot);
-      console.log(JSON.stringify({level:'info',event:'viral_skip_low_confidence',slot,theme:draft.theme,confidence:draft.confidence}));
+      console.log(JSON.stringify({level:'info',event:'viral_retry_low_confidence',slot,theme:draft.theme,confidence:draft.confidence}));
       return;
     }
     await this.db.createOutreach({kind:'CONTENT',sourceText:evidenceText,text:draft.text,score:draft.confidence,status:this.config.mode==='autonomous'?'QUEUED':'DRAFT'});

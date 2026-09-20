@@ -103,7 +103,10 @@ export class OutreachAgent {
     const now=Date.now();
     const groups=await Promise.all(queries.flatMap(query=>(['TOP','RECENT'] as const).map(async type=>{
       const posts=await this.threads.search(query,type,10);
-      console.log(JSON.stringify({level:'info',event:'trend_search',query,type,posts:posts.length}));
+      const own=posts.filter(p=>p.username.toLowerCase()===this.ownUsername).length;
+      const nonEmptyText=posts.filter(p=>p.text.trim().length>0).length;
+      const fresh=posts.filter(p=>Number.isFinite(Date.parse(p.timestamp))&&now-Date.parse(p.timestamp)<=72*3600_000).length;
+      console.log(JSON.stringify({level:'info',event:'trend_search',query,type,posts:posts.length,own,nonEmptyText,fresh}));
       return posts
         .filter(p=>p.username.toLowerCase()!==this.ownUsername)
         .filter(p=>type==='TOP'||now-Date.parse(p.timestamp)<=72*3600_000)

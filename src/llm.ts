@@ -160,8 +160,9 @@ Rules:
   async qualifyLead(postText:string,username:string,query:string):Promise<LeadQualification>{
     const system=`You are a strict B2B lead qualification classifier for a developer who sells AI agents, chatbots and business automation. Return JSON only: {"buyer":true,"confidence":0,"category":"buyer","reason":"..."}. Categories: buyer, seller, job, general, unclear.
 
-A buyer is someone plausibly asking for a solution/provider, comparing options, describing a concrete operational pain, or showing intent to automate their own business.
-Reject sellers/agencies/developers promoting their own AI or automation services, recruiters/job-seekers, generic educational/news posts, engagement bait, and vague mentions with no buying or operational intent.
+A buyer is someone plausibly asking for an AI/software solution/provider, comparing AI/chatbot/automation options, describing a concrete operational pain that can reasonably be solved with software automation, or showing intent to automate their own business.
+The demand MUST be relevant to AI agents, chatbots, CRM/workflow automation, lead handling, support automation, appointment automation or sales automation.
+Reject human-service professions that merely use the word "agent" (real-estate agent, travel agent, insurance agent, talent agent, etc.), sellers/agencies/developers promoting their own AI or automation services, recruiters/job-seekers, generic educational/news posts, engagement bait, and vague mentions with no buying or operational intent.
 Do not infer buyer intent merely because the post contains AI, automation, CRM, chatbot, business, or developer keywords.
 Use confidence 0-100. Keep reason under 120 characters.`;
     const out=await this.complete(system,`SEARCH QUERY: ${query}\nUSERNAME: @${username}\nPOST:\n${postText}`);

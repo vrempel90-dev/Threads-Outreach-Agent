@@ -19,7 +19,8 @@ export function scorePost(text: string, threshold = 55): LeadScore {
   if (SELLER.test(n)) { score -= 60; reasons.push('seller_or_competitor'); }
   if (JOB.test(n)) { score -= 50; reasons.push('job_seeker'); }
   score = Math.max(0, Math.min(100, score));
-  return { score, reasons, language: KK.test(n) ? 'kk' : 'ru', shouldEngage: score >= threshold };
+  const hasFit=reasons.includes('automation_fit');
+  return { score, reasons, language: KK.test(n) ? 'kk' : 'ru', shouldEngage: score >= threshold && hasFit };
 }
 
 export function isHotIntent(text: string): boolean {

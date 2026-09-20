@@ -75,6 +75,11 @@ export class Database {
   async seen(postId: string) { return Boolean((await this.pool.query('SELECT 1 FROM seen_posts WHERE post_id=$1',[postId])).rowCount); }
   async markSeen(postId: string) { await this.pool.query('INSERT INTO seen_posts(post_id) VALUES($1) ON CONFLICT DO NOTHING',[postId]); }
   async blocked(username: string) { return Boolean((await this.pool.query('SELECT 1 FROM blocked_users WHERE username=$1',[username.toLowerCase()])).rowCount); }
+  async releaseLegacySeen():Promise<number>{
+    const r=await this.pool.query(`DELETE FROM seen_posts s USING leads l
+      WHERE s.post_id=l.source_post_id AND l.search_query IS NULL AND l.source_post_id IS NOT NULL`);
+    return r.rowCount??0;
+  }
   async block(username: string, reason='opt_out') { await this.pool.query('INSERT INTO blocked_users(username,reason) VALUES($1,$2) ON CONFLICT(username) DO UPDATE SET reason=excluded.reason',[username.toLowerCase(),reason]); }
 
   async upsertLead(input:{

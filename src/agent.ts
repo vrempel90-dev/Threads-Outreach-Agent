@@ -45,6 +45,11 @@ export class OutreachAgent {
       this.discoveryIssue='SOCIALCRAWL_API_KEY_REQUIRED';
       console.warn(JSON.stringify({level:'warn',event:'socialcrawl_not_configured'}));
     }
+    if(await this.db.getState('legacy_seen_release_v1')!=='done'){
+      const released=await this.db.releaseLegacySeen();
+      await this.db.setState('legacy_seen_release_v1','done');
+      console.log(JSON.stringify({level:'info',event:'legacy_seen_released',released}));
+    }
     return Promise.all([
       this.loop('hunter',this.config.hunterIntervalMs,signal,()=>this.hunterOnce()),
       this.loop('inbound',this.config.inboundIntervalMs,signal,()=>this.inboundOnce()),

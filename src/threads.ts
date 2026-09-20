@@ -22,6 +22,13 @@ export class ThreadsClient {
     return {id:x.id,text:typeof x.text==='string'?x.text:'',username:x.username,permalink:typeof x.permalink==='string'?x.permalink:'',timestamp:x.timestamp};
   }
   async profile(){ const x=await this.call('/me',{fields:'id,username'}); if(!x?.id||!x?.username) throw new Error('INVALID_THREADS_PROFILE'); return {id:String(x.id),username:String(x.username)}; }
+  async debugScopes():Promise<string[]|null>{
+    try{
+      const x=await this.call('/debug_token',{input_token:this.token});
+      const scopes=Array.isArray(x?.data?.scopes)?x.data.scopes.filter((v:any)=>typeof v==='string'):null;
+      return scopes;
+    }catch{return null;}
+  }
   async search(query:string,searchType:'RECENT'|'TOP'='RECENT',limit=25):Promise<ThreadsPost[]>{
     const x=await this.call('/keyword_search',{q:query,search_type:searchType,search_mode:'KEYWORD',fields:'id,text,username,permalink,timestamp',limit:String(Math.max(1,Math.min(50,limit)))});
     return Array.isArray(x?.data)?x.data.map((v:any)=>this.post(v)).filter(Boolean) as ThreadsPost[]:[];

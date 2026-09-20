@@ -52,6 +52,13 @@ export interface ViralDraft {
   confidence:number;
 }
 
+export interface LeadQualification {
+  buyer:boolean;
+  confidence:number;
+  category:'buyer'|'seller'|'job'|'general'|'unclear';
+  reason:string;
+}
+
 export interface WebThreadSignal {
   query:string;
   url:string;
@@ -148,6 +155,21 @@ Rules:
       return signals;
     }
     throw new Error(lastError);
+  }
+
+  async qualifyLead(postText:string,username:string,query:string):Promise<LeadQualification>{
+    const system=`You are a strict B2B lead qualification classifier for a developer who sells AI agents, chatbots and business automation. Return JSON only: {"buyer":true,"confidence":0,"category":"buyer","reason":"..."}. Categories: buyer, seller, job, general, unclear.
+
+A buyer is someone plausibly asking for a solution/provider, comparing options, describing a concrete operational pain, or showing intent to automate their own business.
+Reject sellers/agencies/developers promoting their own AI or automation services, recruiters/job-seekers, generic educational/news posts, engagement bait, and vague mentions with no buying or operational intent.
+Do not infer buyer intent merely because the post contains AI, automation, CRM, chatbot, business, or developer keywords.
+Use confidence 0-100. Keep reason under 120 characters.`;
+    const out=await this.complete(system,`SEARCH QUERY: ${query}\nUSERNAME: @${username}\nPOST:\n${postText}`);
+    const category=String(out?.category??'unclear') as LeadQualification['category'];
+    const confidence=Math.max(0,Math.min(100,Math.round(Number(out?.confidence)||0)));
+    const buyer=Boolean(out?.buyer)&&category==='buyer'&&confidence>=70;
+    const reason=typeof out?.reason==='string'?out.reason.trim().slice(0,120):'';
+    return {buyer,confidence,category:['buyer','seller','job','general','unclear'].includes(category)?category:'unclear',reason};
   }
 
   async outreach(postText:string,language:Language):Promise<string>{

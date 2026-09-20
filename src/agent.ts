@@ -90,6 +90,9 @@ export class OutreachAgent {
       const scored=scorePost(post.text,this.config.minLeadScore);
       console.log(JSON.stringify({level:'info',event:'lead_score',query,username:post.username,score:scored.score,reasons:scored.reasons,relevance:post.relevance,engagement:{likes:post.likes,replies:post.replies,shares:post.shares,reposts:post.reposts,quotes:post.quotes}}));
       if(!scored.shouldEngage)continue;
+      const qualified=await this.llm.qualifyLead(post.text,post.username,query);
+      console.log(JSON.stringify({level:'info',event:'lead_qualification',query,username:post.username,buyer:qualified.buyer,confidence:qualified.confidence,category:qualified.category,reason:qualified.reason}));
+      if(!qualified.buyer)continue;
       candidates++;
 
       const official=await this.threads.resolveCandidate(post.id,post.permalink);

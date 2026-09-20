@@ -8,7 +8,7 @@ test('content slot is deterministic',()=>{
 });
 
 test('trend query rotation is deterministic',()=>{
-  assert.deepEqual(selectTrendQueries(0,2),['AI агент','ИИ агент']);
+  assert.deepEqual(selectTrendQueries(0,2),['AI','ИИ']);
   assert.equal(selectTrendQueries(11,2).length,2);
 });
 

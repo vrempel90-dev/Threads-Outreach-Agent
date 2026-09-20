@@ -17,6 +17,8 @@ export class OutreachAgent {
   lastInboundAt:string|null=null;
   lastContentAt:string|null=null;
   lastError:string|null=null;
+  publicDiscoveryHealthy:boolean|null=null;
+  discoveryIssue:string|null=null;
 
   constructor(readonly config:Config,readonly db:Database,readonly threads:ThreadsClient,readonly llm:LlmClient,readonly notifier:OwnerNotifier){}
 
@@ -41,9 +43,18 @@ export class OutreachAgent {
   async hunterOnce(){
     const query=this.config.queries[this.queryCursor++%this.config.queries.length]!;
     const posts=await this.threads.search(query,'RECENT',25);
+    const externalPosts=posts.filter(p=>p.username.toLowerCase()!==this.ownUsername);
+    if(posts.length>0&&externalPosts.length===0){
+      this.publicDiscoveryHealthy=false;
+      this.discoveryIssue='THREADS_KEYWORD_SEARCH_OWN_ONLY';
+      console.warn(JSON.stringify({level:'warn',event:'public_discovery_unavailable',query,posts:posts.length,own:posts.length}));
+    }else if(externalPosts.length>0){
+      this.publicDiscoveryHealthy=true;
+      this.discoveryIssue=null;
+    }
     let candidates=0,drafted=0;
-    for(const post of posts){
-      if(post.username.toLowerCase()===this.ownUsername||await this.db.seen(post.id))continue;
+    for(const post of externalPosts){
+      if(await this.db.seen(post.id))continue;
       await this.db.markSeen(post.id);
       if(await this.db.blocked(post.username))continue;
       const scored=scorePost(post.text,this.config.minLeadScore);
@@ -106,6 +117,13 @@ export class OutreachAgent {
       const own=posts.filter(p=>p.username.toLowerCase()===this.ownUsername).length;
       const nonEmptyText=posts.filter(p=>p.text.trim().length>0).length;
       const fresh=posts.filter(p=>Number.isFinite(Date.parse(p.timestamp))&&now-Date.parse(p.timestamp)<=72*3600_000).length;
+      if(posts.length>0&&own===posts.length){
+        this.publicDiscoveryHealthy=false;
+        this.discoveryIssue='THREADS_KEYWORD_SEARCH_OWN_ONLY';
+      }else if(posts.length>own){
+        this.publicDiscoveryHealthy=true;
+        this.discoveryIssue=null;
+      }
       console.log(JSON.stringify({level:'info',event:'trend_search',query,type,posts:posts.length,own,nonEmptyText,fresh}));
       return posts
         .filter(p=>p.username.toLowerCase()!==this.ownUsername)

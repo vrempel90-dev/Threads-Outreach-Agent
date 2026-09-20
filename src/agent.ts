@@ -25,6 +25,16 @@ export class OutreachAgent {
   async start(signal:AbortSignal){
     const p=await this.threads.profile(); this.ownUsername=p.username.toLowerCase();
     await this.db.setState('threads_username',p.username);
+    const scopes=await this.threads.debugScopes();
+    if(scopes){
+      const threadScopes=scopes.filter(s=>s.startsWith('threads_')).sort();
+      const hasKeyword=threadScopes.includes('threads_keyword_search');
+      console.log(JSON.stringify({level:'info',event:'threads_token_scopes',scopes:threadScopes,hasKeywordSearch:hasKeyword}));
+      if(!hasKeyword){
+        this.publicDiscoveryHealthy=false;
+        this.discoveryIssue='THREADS_KEYWORD_SEARCH_PERMISSION_MISSING';
+      }
+    }
     return Promise.all([
       this.loop('hunter',this.config.hunterIntervalMs,signal,()=>this.hunterOnce()),
       this.loop('inbound',this.config.inboundIntervalMs,signal,()=>this.inboundOnce()),

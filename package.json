@@ -12,5 +12,5 @@
   },
   "engines": {"node": ">=22"},
   "dependencies": {"pg": "8.23.0"},
-  "devDependencies": {"@types/node": "22.20.1", "@types/pg": "8.23.1", "typescript": "5.9.3"}
+  "devDependencies": {"@types/node": "^22.0.0", "@types/pg": "8.23.1", "typescript": "^5.9.0"}
 }

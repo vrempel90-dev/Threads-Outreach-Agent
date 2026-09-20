@@ -7,8 +7,8 @@ test('content slot is deterministic',()=>{
   assert.notEqual(contentSlot(new Date('2026-09-20T03:59:59Z'),4),contentSlot(new Date('2026-09-20T04:00:00Z'),4));
 });
 
-test('trend query rotation is deterministic',()=>{
-  assert.deepEqual(selectTrendQueries(0,2),['ChatGPT','OpenAI']);
+test('trend query rotation is deterministic and business-focused',()=>{
+  assert.deepEqual(selectTrendQueries(0,2),['AI агент для бизнеса','ИИ агент для бизнеса']);
   assert.equal(selectTrendQueries(11,2).length,2);
 });
 

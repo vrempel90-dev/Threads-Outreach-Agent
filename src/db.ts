@@ -6,10 +6,11 @@ const { Pool } = pg;
 
 export class Database {
   readonly pool: pg.Pool;
-  constructor(url: string) { this.pool = new Pool({ connectionString: url, max: 5 }); }
+  constructor(url: string) { this.pool = new Pool({ connectionString: url, max: 5, options: '-c search_path=threads_outreach,public' }); }
 
   async migrate() {
     await this.pool.query(`
+      CREATE SCHEMA IF NOT EXISTS threads_outreach;
       CREATE TABLE IF NOT EXISTS leads (
         username text PRIMARY KEY,
         score integer NOT NULL DEFAULT 0,

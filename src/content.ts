@@ -1,15 +1,32 @@
-export const CONTENT_SEEDS = [
-  'Почему бизнес теряет заявки не из-за рекламы, а между первым сообщением и ответом менеджера',
-  'Какие повторяющиеся вопросы клиентов уже пора отдавать чат-боту или AI-агенту',
-  'Где AI-агент полезнее дополнительного менеджера, а где его использовать не надо',
-  'Почему автоматизация без понятного handoff человеку ломает продажи',
-  'Как понять, что процесс созрел для автоматизации: ручной ввод, повторение, задержки, потеря контекста',
-  'Что первым автоматизировать в отделе продаж: квалификацию, ответы, запись или CRM',
-  'Почему вирусный контент сам по себе бесполезен, если он не выводит на реальную боль бизнеса',
-  'Разбор типичного процесса: сообщение клиента → квалификация → запись/CRM → менеджер'
+export const TREND_QUERIES = [
+  'AI агент', 'ИИ агент', 'ChatGPT', 'OpenAI', 'Claude', 'Gemini',
+  'нейросети', 'автоматизация бизнеса', 'чат бот', 'AI для бизнеса',
+  'искусственный интеллект', 'продажи автоматизация'
 ] as const;
 
-export function contentSlot(now=new Date(),hours=6):string{
-  const h=Math.floor(now.getTime()/(hours*3600_000));
-  return String(h);
+export interface TrendEvidence {
+  query: string;
+  type: 'TOP' | 'RECENT';
+  rank: number;
+  text: string;
+  username: string;
+  timestamp: string;
+  permalink: string;
+}
+
+export function contentSlot(now=new Date(),hours=4):string{
+  return String(Math.floor(now.getTime()/(hours*3600_000)));
+}
+
+export function selectTrendQueries(cursor:number,count=4):string[]{
+  const out:string[]=[];
+  for(let i=0;i<count;i++) out.push(TREND_QUERIES[(cursor+i)%TREND_QUERIES.length]!);
+  return out;
+}
+
+export function formatTrendEvidence(rows:TrendEvidence[]):string{
+  return rows
+    .sort((a,b)=>a.query.localeCompare(b.query)||a.type.localeCompare(b.type)||a.rank-b.rank)
+    .map(x=>`[${x.query} | ${x.type} #${x.rank} | ${x.timestamp}] @${x.username}: ${x.text.slice(0,420)}`)
+    .join('\n');
 }

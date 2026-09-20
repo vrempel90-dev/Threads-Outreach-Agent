@@ -11,7 +11,7 @@ const parseJson=(text:string):any=>{
 export class LlmClient {
   constructor(private readonly key:string, private readonly baseUrl:string, private readonly model:string){}
   private async complete(system:string,user:string):Promise<any>{
-    const res=await fetch(`${this.baseUrl}/chat/completions`,{method:'POST',headers:{authorization:`Bearer ${this.key}`,'content-type':'application/json'},body:JSON.stringify({model:this.model,temperature:0.7,messages:[{role:'system',content:system},{role:'user',content:user}],response_format:{type:'json_object'}})});
+    const res=await fetch(`${this.baseUrl}/chat/completions`,{method:'POST',headers:{authorization:`Bearer ${this.key}`,'content-type':'application/json'},body:JSON.stringify({model:this.model,max_completion_tokens:600,reasoning_effort:'minimal',messages:[{role:'system',content:system},{role:'user',content:user}],response_format:{type:'json_object'}})});
     const x=await res.json().catch(()=>null) as any;
     if(!res.ok) throw new Error(`LLM_${x?.error?.code??res.status}`);
     const text=x?.choices?.[0]?.message?.content; if(typeof text!=='string'||!text.trim()) throw new Error('LLM_EMPTY');

@@ -20,6 +20,11 @@ export class Database {
         last_message text,
         updated_at timestamptz NOT NULL DEFAULT now()
       );
+      ALTER TABLE leads ADD COLUMN IF NOT EXISTS search_query text;
+      ALTER TABLE leads ADD COLUMN IF NOT EXISTS ai_category text;
+      ALTER TABLE leads ADD COLUMN IF NOT EXISTS ai_confidence integer;
+      ALTER TABLE leads ADD COLUMN IF NOT EXISTS ai_reason text;
+      ALTER TABLE leads ADD COLUMN IF NOT EXISTS officially_resolved boolean NOT NULL DEFAULT false;
       CREATE TABLE IF NOT EXISTS seen_posts (
         post_id text PRIMARY KEY,
         seen_at timestamptz NOT NULL DEFAULT now()
@@ -72,13 +77,45 @@ export class Database {
   async blocked(username: string) { return Boolean((await this.pool.query('SELECT 1 FROM blocked_users WHERE username=$1',[username.toLowerCase()])).rowCount); }
   async block(username: string, reason='opt_out') { await this.pool.query('INSERT INTO blocked_users(username,reason) VALUES($1,$2) ON CONFLICT(username) DO UPDATE SET reason=excluded.reason',[username.toLowerCase(),reason]); }
 
-  async upsertLead(input:{username:string;score:number;stage:string;sourcePostId?:string;sourcePermalink?:string;lastMessage?:string}) {
-    await this.pool.query(`INSERT INTO leads(username,score,stage,source_post_id,source_permalink,last_message)
-      VALUES($1,$2,$3,$4,$5,$6)
-      ON CONFLICT(username) DO UPDATE SET score=GREATEST(leads.score,excluded.score), stage=excluded.stage,
-      source_post_id=COALESCE(excluded.source_post_id,leads.source_post_id), source_permalink=COALESCE(excluded.source_permalink,leads.source_permalink),
-      last_message=COALESCE(excluded.last_message,leads.last_message), updated_at=now()`,
-      [input.username.toLowerCase(),input.score,input.stage,input.sourcePostId??null,input.sourcePermalink??null,input.lastMessage??null]);
+  async upsertLead(input:{
+    username:string;score:number;stage:string;sourcePostId?:string;sourcePermalink?:string;lastMessage?:string;
+    searchQuery?:string;aiCategory?:string;aiConfidence?:number;aiReason?:string;officiallyResolved?:boolean;
+  }) {
+    await this.pool.query(`INSERT INTO leads(
+        username,score,stage,source_post_id,source_permalink,last_message,
+        search_query,ai_category,ai_confidence,ai_reason,officially_resolved
+      ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      ON CONFLICT(username) DO UPDATE SET
+        score=GREATEST(leads.score,excluded.score),
+        stage=excluded.stage,
+        source_post_id=COALESCE(excluded.source_post_id,leads.source_post_id),
+        source_permalink=COALESCE(excluded.source_permalink,leads.source_permalink),
+        last_message=COALESCE(excluded.last_message,leads.last_message),
+        search_query=COALESCE(excluded.search_query,leads.search_query),
+        ai_category=COALESCE(excluded.ai_category,leads.ai_category),
+        ai_confidence=COALESCE(excluded.ai_confidence,leads.ai_confidence),
+        ai_reason=COALESCE(excluded.ai_reason,leads.ai_reason),
+        officially_resolved=leads.officially_resolved OR excluded.officially_resolved,
+        updated_at=now()`,
+      [
+        input.username.toLowerCase(),input.score,input.stage,input.sourcePostId??null,input.sourcePermalink??null,input.lastMessage??null,
+        input.searchQuery??null,input.aiCategory??null,input.aiConfidence??null,input.aiReason??null,input.officiallyResolved??false
+      ]);
+  }
+
+  async unqualifiedLeads(limit=20):Promise<LeadRow[]>{
+    return (await this.pool.query<LeadRow>(`SELECT * FROM leads
+      WHERE ai_category IS NULL AND stage IN ('WARM','QUALIFIED')
+      ORDER BY updated_at DESC LIMIT $1`,[limit])).rows;
+  }
+
+  async setLeadQualification(username:string,input:{buyer:boolean;category:string;confidence:number;reason:string}){
+    await this.pool.query(`UPDATE leads SET
+      ai_category=$2,ai_confidence=$3,ai_reason=$4,
+      stage=CASE WHEN $5::boolean THEN stage ELSE 'REJECTED' END,
+      updated_at=now()
+      WHERE username=$1`,
+      [username.toLowerCase(),input.category,input.confidence,input.reason,input.buyer]);
   }
 
   async recentContact(username:string, days:number):Promise<boolean>{
@@ -105,6 +142,13 @@ export class Database {
     return Boolean(r.rowCount);
   }
   async listLeads(limit=100):Promise<LeadRow[]>{ return (await this.pool.query<LeadRow>('SELECT * FROM leads ORDER BY score DESC, updated_at DESC LIMIT $1',[limit])).rows; }
+  async listDashboardLeads(limit=30):Promise<LeadRow[]>{
+    return (await this.pool.query<LeadRow>(`SELECT * FROM leads
+      WHERE ai_category='buyer' OR stage IN ('HOT','ENGAGED')
+      ORDER BY CASE stage WHEN 'HOT' THEN 0 WHEN 'ENGAGED' THEN 1 WHEN 'QUALIFIED' THEN 2 ELSE 3 END,
+               score DESC, updated_at DESC
+      LIMIT $1`,[limit])).rows;
+  }
   async listOutreach(limit=100){ return (await this.pool.query('SELECT * FROM outreach ORDER BY created_at DESC LIMIT $1',[limit])).rows; }
   async counts(){
     const r=await this.pool.query(`SELECT

@@ -23,5 +23,10 @@ export interface LeadRow {
   source_post_id: string | null;
   source_permalink: string | null;
   last_message: string | null;
+  search_query: string | null;
+  ai_category: string | null;
+  ai_confidence: number | null;
+  ai_reason: string | null;
+  officially_resolved: boolean;
   updated_at: string;
 }

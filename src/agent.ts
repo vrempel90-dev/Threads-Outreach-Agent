@@ -45,6 +45,7 @@ export class OutreachAgent {
       this.discoveryIssue='SOCIALCRAWL_API_KEY_REQUIRED';
       console.warn(JSON.stringify({level:'warn',event:'socialcrawl_not_configured'}));
     }
+    await this.backfillLeadQualifications();
     return Promise.all([
       this.loop('hunter',this.config.hunterIntervalMs,signal,()=>this.hunterOnce()),
       this.loop('inbound',this.config.inboundIntervalMs,signal,()=>this.inboundOnce()),
@@ -61,6 +62,20 @@ export class OutreachAgent {
   }
 
   private allowedByRate(username:string){return Promise.all([this.db.sentCount(1),this.db.sentCount(24),this.db.recentContact(username,this.config.userCooldownDays)]).then(([hour,day,recent])=>!recent&&hour<this.config.maxPerHour&&day<this.config.maxPerDay);}
+
+  private async backfillLeadQualifications(){
+    if(await this.db.getState('lead_ai_backfill_v1')==='done')return;
+    const rows=await this.db.unqualifiedLeads(20);
+    for(const row of rows){
+      const text=String(row.last_message??'').trim();
+      if(!text){await this.db.setLeadQualification(row.username,{buyer:false,category:'unclear',confidence:0,reason:'No source text available'});continue;}
+      const qualified=await this.llm.qualifyLead(text,row.username,row.search_query??'historical candidate');
+      await this.db.setLeadQualification(row.username,qualified);
+      console.log(JSON.stringify({level:'info',event:'lead_backfill_qualification',username:row.username,buyer:qualified.buyer,confidence:qualified.confidence,category:qualified.category}));
+    }
+    await this.db.setState('lead_ai_backfill_v1','done');
+    console.log(JSON.stringify({level:'info',event:'lead_backfill_complete',processed:rows.length}));
+  }
 
   async hunterOnce(){
     if(!this.socialCrawl.enabled){
@@ -101,7 +116,12 @@ export class OutreachAgent {
       const username=official?.username||post.username;
       const text=official?.text||post.text;
 
-      await this.db.upsertLead({username,score:scored.score,stage:scored.score>=80?'QUALIFIED':'WARM',sourcePostId,sourcePermalink:permalink,lastMessage:text});
+      await this.db.upsertLead({
+        username,score:scored.score,stage:scored.score>=80?'QUALIFIED':'WARM',
+        sourcePostId,sourcePermalink:permalink,lastMessage:text,
+        searchQuery:query,aiCategory:qualified.category,aiConfidence:qualified.confidence,aiReason:qualified.reason,
+        officiallyResolved:Boolean(official)
+      });
       console.log(JSON.stringify({level:'info',event:'lead_found',source:'socialcrawl',query,username,score:scored.score,officiallyResolved:Boolean(official),permalink}));
 
       if(!official){discoveredOnly++;continue;}

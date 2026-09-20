@@ -1,17 +1,23 @@
 import type { Language } from './types.js';
 
 const parseJson=(text:string):any=>{
-  const clean=text.trim().replace(/^\`\`\`(?:json)?/i,'').replace(/\`\`\`$/,'').trim();
+  const clean=text.trim().replace(/^```(?:json)?/i,'').replace(/```$/,'').trim();
   try{return JSON.parse(clean)}catch{}
   const a=clean.indexOf('{'),b=clean.lastIndexOf('}');
   if(a>=0&&b>a) return JSON.parse(clean.slice(a,b+1));
   throw new Error('LLM_INVALID_JSON');
 };
 
+export interface ViralDraft {
+  text:string;
+  theme:string;
+  confidence:number;
+}
+
 export class LlmClient {
   constructor(private readonly key:string, private readonly baseUrl:string, private readonly model:string){}
   private async complete(system:string,user:string):Promise<any>{
-    const res=await fetch(`${this.baseUrl}/chat/completions`,{method:'POST',headers:{authorization:`Bearer ${this.key}`,'content-type':'application/json'},body:JSON.stringify({model:this.model,max_completion_tokens:600,reasoning_effort:'minimal',messages:[{role:'system',content:system},{role:'user',content:user}],response_format:{type:'json_object'}})});
+    const res=await fetch(`${this.baseUrl}/chat/completions`,{method:'POST',headers:{authorization:`Bearer ${this.key}`,'content-type':'application/json'},body:JSON.stringify({model:this.model,max_completion_tokens:800,reasoning_effort:'minimal',messages:[{role:'system',content:system},{role:'user',content:user}],response_format:{type:'json_object'}})});
     const x=await res.json().catch(()=>null) as any;
     if(!res.ok) throw new Error(`LLM_${x?.error?.code??res.status}`);
     const text=x?.choices?.[0]?.message?.content; if(typeof text!=='string'||!text.trim()) throw new Error('LLM_EMPTY');
@@ -27,9 +33,27 @@ export class LlmClient {
     const out=await this.complete(system,`CONTEXT:\n${context}\n\nNEW REPLY:\n${inbound}`);
     const reply=typeof out?.reply==='string'?out.reply.trim():''; if(!reply||[...reply].length>450) throw new Error('LLM_BAD_REPLY'); return reply;
   }
-  async content(seed:string):Promise<string>{
-    const system=`Create one Russian Threads post for a specialist who builds AI agents, chatbots and business automations. Return JSON {"text":"..."}. It must attract business owners with a real operational pain and create qualified conversations, not empty views. Use a strong but defensible hook, concrete process insight, no fabricated statistics/cases, no fake scarcity, no guaranteed results, and finish with a question that exposes a business problem. Max 480 characters.`;
-    const out=await this.complete(system,seed);
-    const text=typeof out?.text==='string'?out.text.trim():''; if(!text||[...text].length>500) throw new Error('LLM_BAD_CONTENT'); return text;
+  async viralContent(evidence:string):Promise<ViralDraft>{
+    const system=`You are a real-time Threads editor for a specialist who builds AI agents, chatbots and business automations. You receive live evidence collected from Threads TOP and RECENT keyword search. First infer ONE topic that is genuinely active now from repeated/strong evidence. Then write an ORIGINAL Russian Threads post that connects that topic to a concrete business implication.
+
+Return exactly JSON {"text":"...","theme":"...","confidence":0}. confidence is 0-100 and must reflect how strongly the supplied evidence supports that this theme is active now.
+
+Rules:
+- Never claim a trend unless it is supported by the supplied evidence.
+- Never copy or closely paraphrase a source post.
+- Never invent news, launches, statistics, client cases, revenue, prices or results.
+- If evidence conflicts or is weak, confidence must be below 70.
+- Strong hook in the first line; specific insight; one tension/contrarian angle where justified.
+- Make the reader want to comment from their own business experience.
+- No generic motivational AI hype.
+- The post must still make sense if the reader has not seen the source posts.
+- Max 480 characters.
+- End with one concise question that reveals a real business problem.`;
+    const out=await this.complete(system,evidence);
+    const text=typeof out?.text==='string'?out.text.trim():'';
+    const theme=typeof out?.theme==='string'?out.theme.trim():'';
+    const confidence=Number(out?.confidence);
+    if(!text||[...text].length>500||!theme||!Number.isFinite(confidence)||confidence<0||confidence>100) throw new Error('LLM_BAD_VIRAL_DRAFT');
+    return {text,theme,confidence:Math.round(confidence)};
   }
 }

@@ -52,7 +52,8 @@ export function loadConfig() {
       chatId: optional('OWNER_TELEGRAM_CHAT_ID'),
       bindCode: optional('TELEGRAM_BIND_CODE')
     },
-    dashboardToken: optional('DASHBOARD_TOKEN')
+    dashboardToken: optional('DASHBOARD_TOKEN'),
+    oneTimeTestPost: optional('ONE_TIME_TEST_POST_TEXT')
   });
 }
 export type Config = ReturnType<typeof loadConfig>;

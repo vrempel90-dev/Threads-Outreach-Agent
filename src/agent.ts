@@ -25,6 +25,15 @@ export class OutreachAgent {
   async start(signal:AbortSignal){
     const p=await this.threads.profile(); this.ownUsername=p.username.toLowerCase();
     await this.db.setState('threads_username',p.username);
+    if(this.config.oneTimeTestPost){
+      const stateKey='one_time_test_post_v1';
+      if(await this.db.getState(stateKey)!=='sent'){
+        const externalId=await this.threads.publish(this.config.oneTimeTestPost);
+        await this.db.setState(stateKey,'sent');
+        await this.db.setState(stateKey+'_external_id',externalId);
+        console.log(JSON.stringify({level:'info',event:'one_time_test_post_sent',externalId}));
+      }
+    }
     const scopes=await this.threads.debugScopes();
     if(scopes){
       const threadScopes=scopes.filter(s=>s.startsWith('threads_')).sort();

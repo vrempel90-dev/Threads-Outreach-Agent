@@ -88,6 +88,7 @@ export class OutreachAgent {
       await this.db.markSeen(post.id);
       if(await this.db.blocked(post.username))continue;
       const scored=scorePost(post.text,this.config.minLeadScore);
+      console.log(JSON.stringify({level:'info',event:'lead_score',query,username:post.username,score:scored.score,reasons:scored.reasons,relevance:post.relevance,engagement:{likes:post.likes,replies:post.replies,shares:post.shares,reposts:post.reposts,quotes:post.quotes}}));
       if(!scored.shouldEngage)continue;
       candidates++;
 

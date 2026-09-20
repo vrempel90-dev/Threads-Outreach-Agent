@@ -72,8 +72,8 @@ export class SocialCrawlClient {
       const res=await fetch(url,{headers:{'x-api-key':this.apiKey},signal:controller.signal,redirect:'error'});
       const body=await res.json().catch(()=>null) as any;
       if(!res.ok||body?.success===false)throw new Error(`SOCIALCRAWL_${body?.error?.type??res.status}`);
-      this.lastCreditsUsed=Number.isFinite(Number(body?.credits_used))?Number(body.credits_used):null;
-      this.lastCreditsRemaining=Number.isFinite(Number(body?.credits_remaining))?Number(body.credits_remaining):null;
+      this.lastCreditsUsed=body?.credits_used===null||body?.credits_used===undefined?null:(Number.isFinite(Number(body.credits_used))?Number(body.credits_used):null);
+      this.lastCreditsRemaining=body?.credits_remaining===null||body?.credits_remaining===undefined?null:(Number.isFinite(Number(body.credits_remaining))?Number(body.credits_remaining):null);
       const posts=parseSocialCrawlItems(body);
       console.log(JSON.stringify({level:'info',event:'socialcrawl_search',query,posts:posts.length,creditsUsed:this.lastCreditsUsed,creditsRemaining:this.lastCreditsRemaining}));
       return posts;

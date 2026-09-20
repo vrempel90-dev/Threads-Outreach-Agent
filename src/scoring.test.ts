@@ -17,3 +17,16 @@ test('hot and opt-out intents are detected', () => {
   assert.equal(isHotIntent('Сколько стоит и когда можно начать?'), true);
   assert.equal(isOptOut('Не пишите'), true);
 });
+
+
+test('rejects human-service agent false positive',()=>{
+  const s=scorePost('Нужен агент по недвижимости для бизнеса, ищу специалиста');
+  assert.equal(s.shouldEngage,false);
+  assert.equal(s.reasons.includes('automation_fit'),false);
+});
+
+test('accepts explicit chatbot buyer intent',()=>{
+  const s=scorePost('Нужен чат бот для бизнеса, чтобы автоматизировать заявки');
+  assert.equal(s.shouldEngage,true);
+  assert.ok(s.score>=55);
+});

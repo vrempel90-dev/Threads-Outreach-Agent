@@ -123,6 +123,16 @@ export class Database {
       [username.toLowerCase(),input.category,input.confidence,input.reason,input.buyer]);
   }
 
+  async releaseUnresolvedBuyerSeen():Promise<number>{
+    const r=await this.pool.query(`DELETE FROM seen_posts s USING leads l
+      WHERE s.post_id=l.source_post_id
+        AND l.search_query IS NOT NULL
+        AND l.ai_category='buyer'
+        AND l.officially_resolved=false
+        AND l.source_post_id IS NOT NULL`);
+    return r.rowCount??0;
+  }
+
   async recentContact(username:string, days:number):Promise<boolean>{
     const r=await this.pool.query(`SELECT 1 FROM outreach WHERE username=$1 AND status IN ('QUEUED','SENT') AND created_at>now()-($2::text||' days')::interval LIMIT 1`,[username.toLowerCase(),String(days)]);
     return Boolean(r.rowCount);

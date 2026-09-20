@@ -186,26 +186,46 @@ Use confidence 0-100. Keep reason under 120 characters.`;
   }
 
   async viralContent(evidence:string):Promise<ViralDraft>{
-    const system=`You are a real-time Threads editor for a specialist who builds AI agents, chatbots and business automations. You receive live web evidence from public Threads post sources. First infer ONE topic that is genuinely active now from repeated/strong evidence. Then write an ORIGINAL Russian Threads post that connects that topic to a concrete business implication.
+    const system=`You are a real-time Threads editor for a specialist who builds AI agents, chatbots and business automations. You receive live evidence collected from public Threads posts. Infer ONE topic that is genuinely active now, then write an ORIGINAL Russian Threads post connecting it to a concrete business implication.
 
-Return exactly JSON {"text":"...","theme":"...","confidence":0}. confidence is 0-100 and must reflect how strongly the supplied evidence supports that this theme is active now.
+Return exactly JSON {"text":"...","theme":"...","confidence":0}.
 
-Rules:
-- Never claim a trend unless it is supported by the supplied evidence.
-- Never copy or closely paraphrase a source post.
-- Never invent news, launches, statistics, client cases, revenue, prices or results.
-- If evidence conflicts or is weak, confidence must be below 70.
-- Strong hook in the first line; specific insight; one tension/contrarian angle where justified.
-- Make the reader want to comment from their own business experience.
-- No generic motivational AI hype.
-- The post must still make sense if the reader has not seen the source posts.
-- Max 480 characters.
-- End with one concise question that reveals a real business problem.`;
-    const out=await this.complete(system,evidence);
-    const text=typeof out?.text==='string'?out.text.trim():'';
-    const theme=typeof out?.theme==='string'?out.theme.trim():'';
-    const confidence=Number(out?.confidence);
-    if(!text||[...text].length>500||!theme||!Number.isFinite(confidence)||confidence<0||confidence>100) throw new Error('LLM_BAD_VIRAL_DRAFT');
-    return {text,theme,confidence:Math.round(confidence)};
+Hard rules:
+- text MUST be 350-430 characters, never above 450;
+- confidence is 0-100 and reflects evidence strength;
+- never invent news, launches, statistics, clients, revenue, prices or results;
+- never copy or closely paraphrase source posts;
+- no generic motivational AI hype;
+- strong first line, one concrete business insight, one concise question at the end;
+- if evidence is weak or conflicting, confidence must be below 70.`;
+
+    const parseDraft=(out:any):ViralDraft|null=>{
+      const text=typeof out?.text==='string'?out.text.trim():'';
+      const theme=typeof out?.theme==='string'?out.theme.trim():'';
+      const confidence=Number(out?.confidence);
+      if(!text||!theme||!Number.isFinite(confidence)||confidence<0||confidence>100)return null;
+      const len=[...text].length;
+      if(len<80||len>500)return null;
+      return {text,theme,confidence:Math.round(confidence)};
+    };
+
+    const first=await this.complete(system,evidence);
+    const draft=parseDraft(first);
+    if(draft)return draft;
+
+    console.warn(JSON.stringify({
+      level:'warn',event:'viral_draft_repair',
+      textLength:typeof first?.text==='string'?[...first.text.trim()].length:null,
+      hasTheme:typeof first?.theme==='string'&&Boolean(first.theme.trim()),
+      confidence:Number.isFinite(Number(first?.confidence))?Number(first.confidence):null
+    }));
+
+    const repaired=await this.complete(
+      `Repair a Threads draft into valid JSON only: {"text":"...","theme":"...","confidence":0}. Keep the factual meaning. text MUST be 350-430 characters and never exceed 450. Do not add facts, statistics, claims, clients, prices or results that were not already supported. confidence must be 0-100.`,
+      JSON.stringify(first)
+    );
+    const fixed=parseDraft(repaired);
+    if(!fixed)throw new Error('LLM_BAD_VIRAL_DRAFT');
+    return fixed;
   }
 }

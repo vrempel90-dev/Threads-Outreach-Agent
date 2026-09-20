@@ -70,6 +70,16 @@ export class ThreadsClient {
       return posts.find(p=>normalizePermalink(p.permalink)===target)??null;
     }catch{return null;}
   }
+  async probeReplyTarget(replyToId:string):Promise<string>{
+    if(!replyToId.trim())throw new Error('INVALID_REPLY_TARGET');
+    const created=await this.call('/me/threads',{
+      media_type:'TEXT',
+      text:'Спасибо за вопрос.',
+      reply_to_id:replyToId
+    },'POST');
+    if(!created?.id)throw new Error('INVALID_THREADS_REPLY_PROBE');
+    return String(created.id);
+  }
   async mentions():Promise<ThreadsPost[]>{
     const x=await this.call('/me/mentions',{fields:'id,text,username,permalink,timestamp',limit:'50'});
     return Array.isArray(x?.data)?x.data.map((v:any)=>this.post(v)).filter(Boolean) as ThreadsPost[]:[];

@@ -22,6 +22,7 @@ export class OutreachAgent {
   publicDiscoveryHealthy:boolean|null=null;
   discoveryIssue:string|null=null;
   discoverySource='socialcrawl_threads_search';
+  private nextContentAttemptAt=0;
 
   constructor(
     readonly config:Config,
@@ -49,6 +50,11 @@ export class OutreachAgent {
       const released=await this.db.releaseLegacySeen();
       await this.db.setState('legacy_seen_release_v1','done');
       console.log(JSON.stringify({level:'info',event:'legacy_seen_released',released}));
+    }
+    if(await this.db.getState('direct_reply_probe_release_v1')!=='done'){
+      const released=await this.db.releaseUnresolvedBuyerSeen();
+      await this.db.setState('direct_reply_probe_release_v1','done');
+      console.log(JSON.stringify({level:'info',event:'direct_reply_probe_seen_released',released}));
     }
     return Promise.all([
       this.loop('hunter',this.config.hunterIntervalMs,signal,()=>this.hunterOnce()),
@@ -106,19 +112,38 @@ export class OutreachAgent {
       const username=official?.username||post.username;
       const text=official?.text||post.text;
 
+      let replyTargetVerified=Boolean(official);
+      if(!replyTargetVerified){
+        const directState=await this.db.getState('socialcrawl_reply_ids');
+        if(directState==='supported'){
+          replyTargetVerified=true;
+        }else{
+          try{
+            const probeId=await this.threads.probeReplyTarget(sourcePostId);
+            replyTargetVerified=true;
+            await this.db.setState('socialcrawl_reply_ids','supported');
+            console.log(JSON.stringify({level:'info',event:'direct_reply_probe_success',username,sourcePostId,probeId}));
+          }catch(e){
+            const code=e instanceof Error?e.message:'DIRECT_REPLY_PROBE_FAILED';
+            await this.db.setState('socialcrawl_reply_ids',`unsupported:${code}`);
+            console.warn(JSON.stringify({level:'warn',event:'direct_reply_probe_failed',username,sourcePostId,code}));
+          }
+        }
+      }
+
       await this.db.upsertLead({
         username,score:scored.score,stage:scored.score>=80?'QUALIFIED':'WARM',
         sourcePostId,sourcePermalink:permalink,lastMessage:text,
         searchQuery:query,aiCategory:qualified.category,aiConfidence:qualified.confidence,aiReason:qualified.reason,
-        officiallyResolved:Boolean(official)
+        officiallyResolved:replyTargetVerified
       });
-      console.log(JSON.stringify({level:'info',event:'lead_found',source:'socialcrawl',query,username,score:scored.score,officiallyResolved:Boolean(official),permalink}));
+      console.log(JSON.stringify({level:'info',event:'lead_found',source:'socialcrawl',query,username,score:scored.score,officiallyResolved:replyTargetVerified,permalink}));
 
-      if(!official){discoveredOnly++;continue;}
+      if(!replyTargetVerified){discoveredOnly++;continue;}
       resolved++;
       if(!await this.allowedByRate(username))continue;
       const reply=await this.llm.outreach(text,scored.language);
-      await this.db.createOutreach({kind:'REPLY',username,sourcePostId:official.id,sourcePermalink:permalink,sourceText:text,text:reply,score:scored.score,status:this.config.mode==='autonomous'?'QUEUED':'DRAFT'});
+      await this.db.createOutreach({kind:'REPLY',username,sourcePostId,sourcePermalink:permalink,sourceText:text,text:reply,score:scored.score,status:this.config.mode==='autonomous'?'QUEUED':'DRAFT'});
       drafted++;
     }
     this.lastHunterAt=new Date().toISOString();
@@ -193,30 +218,39 @@ export class OutreachAgent {
   async contentOnce(){
     const hours=Math.max(1,Math.round(this.config.contentIntervalMs/3600_000));
     const slot=contentSlot(new Date(),hours);
-    if(await this.db.getState('content_slot')===slot||await this.db.getState('content_attempt_slot')===slot)return;
-    await this.db.setState('content_attempt_slot',slot);
+    if(await this.db.getState('content_slot')===slot)return;
+    if(Date.now()<this.nextContentAttemptAt)return;
+    this.nextContentAttemptAt=Date.now()+20*60_000;
+
     if(!this.socialCrawl.enabled){
       console.warn(JSON.stringify({level:'warn',event:'content_skipped',reason:'SOCIALCRAWL_API_KEY_REQUIRED'}));
       return;
     }
+
     let evidence:TrendEvidence[];
     try{evidence=await this.collectTrendEvidence();}
     catch(e){console.error(JSON.stringify({level:'error',event:'trend_socialcrawl_failed',code:e instanceof Error?e.message:'UNKNOWN'}));return;}
 
     const queries=new Set(evidence.map(x=>x.query)).size;
     if(evidence.length<6||queries<2){
-      console.log(JSON.stringify({level:'info',event:'viral_skip_weak_evidence',slot,evidence:evidence.length,queries}));
+      console.log(JSON.stringify({level:'info',event:'viral_retry_weak_evidence',slot,evidence:evidence.length,queries,retryMinutes:20}));
       return;
     }
-    const evidenceText=formatTrendEvidence(evidence).slice(0,14000);
-    const draft=await this.llm.viralContent(evidenceText);
-    if(draft.confidence<70){
-      console.log(JSON.stringify({level:'info',event:'viral_skip_low_confidence',slot,theme:draft.theme,confidence:draft.confidence}));
-      return;
+
+    try{
+      const evidenceText=formatTrendEvidence(evidence).slice(0,14000);
+      const draft=await this.llm.viralContent(evidenceText);
+      if(draft.confidence<70){
+        console.log(JSON.stringify({level:'info',event:'viral_retry_low_confidence',slot,theme:draft.theme,confidence:draft.confidence,retryMinutes:20}));
+        return;
+      }
+      await this.db.createOutreach({kind:'CONTENT',sourceText:evidenceText,text:draft.text,score:draft.confidence,status:this.config.mode==='autonomous'?'QUEUED':'DRAFT'});
+      await this.db.setState('content_slot',slot);
+      this.nextContentAttemptAt=0;
+      this.lastContentAt=new Date().toISOString();
+      console.log(JSON.stringify({level:'info',event:'viral_content_drafted',slot,theme:draft.theme,confidence:draft.confidence,evidence:evidence.length,mode:this.config.mode}));
+    }catch(e){
+      console.error(JSON.stringify({level:'error',event:'viral_content_failed',slot,code:e instanceof Error?e.message:'UNKNOWN',retryMinutes:20}));
     }
-    await this.db.createOutreach({kind:'CONTENT',sourceText:evidenceText,text:draft.text,score:draft.confidence,status:this.config.mode==='autonomous'?'QUEUED':'DRAFT'});
-    await this.db.setState('content_slot',slot);
-    this.lastContentAt=new Date().toISOString();
-    console.log(JSON.stringify({level:'info',event:'viral_content_drafted',slot,theme:draft.theme,confidence:draft.confidence,evidence:evidence.length,mode:this.config.mode}));
   }
 }

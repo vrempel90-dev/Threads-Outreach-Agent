@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { contentSlot, selectTrendQueries, formatTrendEvidence } from './content.js';
+import { contentSlot, selectTrendQueries, formatTrendEvidence, evergreenTheme } from './content.js';
 
 test('content slot is deterministic',()=>{
   assert.equal(contentSlot(new Date('2026-09-20T00:00:00Z'),4),contentSlot(new Date('2026-09-20T03:59:59Z'),4));
@@ -8,7 +8,7 @@ test('content slot is deterministic',()=>{
 });
 
 test('trend query rotation is deterministic',()=>{
-  assert.deepEqual(selectTrendQueries(0,2),['AI агент для бизнеса','ИИ агент для бизнеса']);
+  assert.deepEqual(selectTrendQueries(0,2),['AI','ИИ']);
   assert.equal(selectTrendQueries(11,2).length,2);
 });
 
@@ -16,4 +16,10 @@ test('trend evidence contains rank and source context',()=>{
   const text=formatTrendEvidence([{query:'AI агент',type:'TOP',rank:1,text:'example',username:'u',timestamp:'2026-09-20T00:00:00Z',permalink:''}]);
   assert.match(text,/TOP #1/);
   assert.match(text,/example/);
+});
+
+
+test('evergreen theme is deterministic for a slot',()=>{
+  assert.equal(evergreenTheme('124310'),evergreenTheme('124310'));
+  assert.ok(evergreenTheme('124310').length>20);
 });

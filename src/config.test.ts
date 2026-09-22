@@ -5,12 +5,13 @@ import { loadConfig } from './config.js';
 test('startup configuration allows missing external API keys', () => {
   const previous = { ...process.env };
   try {
-    process.env.DATABASE_URL = 'postgresql://user:pass@localhost:5432/test';
+    delete process.env.DATABASE_URL;
     delete process.env.THREADS_ACCESS_TOKEN;
     delete process.env.OPENAI_API_KEY;
     delete process.env.SEARCH_QUERIES;
     process.env.AGENT_MODE = 'review';
     const cfg = loadConfig();
+    assert.equal(cfg.databaseUrl, '');
     assert.equal(cfg.threads.token, '');
     assert.equal(cfg.llm.key, '');
     assert.equal(cfg.mode, 'review');

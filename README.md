@@ -1,39 +1,127 @@
 # Threads Outreach Agent
 
-Production lead-generation agent for Threads focused on **AI agents, chatbots and business automation**.
+Production-oriented lead-generation agent for **Threads**, focused specifically on selling:
 
-## Real workflow
+- AI agents / ИИ-агенты;
+- chatbots for Telegram, WhatsApp and customer support;
+- AI administrators and assistants;
+- CRM/workflow automation;
+- lead, sales, support and appointment automation.
 
-`Threads keyword search → deterministic lead scoring → LLM context reply → PostgreSQL → review/autonomous publish → reply monitoring → follow-up → HOT lead notification`
+## Core loop
 
-This is not a UI mock. The runtime calls Threads API for account verification, keyword search, publishing replies/posts, mentions and reading replies. It stores leads, seen posts, drafts, sent messages and inbound replies in PostgreSQL.
+`DISCOVER → FILTER → SCORE → AI QUALIFY → DRAFT/REPLY → FOLLOW UP → HOT LEAD`
+
+The project is designed to find **buyer intent**, not merely posts mentioning AI.
+
+## Lead discovery
+
+Public Threads discovery is performed through **SocialCrawl Threads search** when `SOCIALCRAWL_API_KEY` is configured.
+
+The default search pack contains Russian and Kazakh high-intent phrases such as:
+
+- `нужен чат-бот`
+- `нужен AI агент`
+- `ищу разработчика AI агента`
+- `бот для WhatsApp бизнес`
+- `AI администратор для бизнеса`
+- `автоматизация отдела продаж`
+- `автоматизация поддержки клиентов`
+- `чат бот керек`
+- `AI агент керек`
+- `бизнесті автоматтандыру керек`
+
+`LEAD_LOOKBACK_DAYS` controls freshness; the default is 7 days.
+
+## Qualification
+
+A candidate must have both:
+
+1. relevance to AI agents, chatbots or business automation; and
+2. real commercial intent or a concrete operational pain that the author wants to automate.
+
+The deterministic filter rejects common false positives before the LLM is called:
+
+- AI agencies/developers promoting their own services;
+- people looking for clients;
+- vacancies, resumes and job seekers;
+- human professions containing the word “agent” (real-estate agent, travel agent, etc.);
+- generic AI discussions without buying intent.
+
+Kazakhstan/CIS signals increase priority but **never create buyer intent by themselves**.
+
+The LLM then performs a second strict buyer/seller/job/general classification.
+
+## Threads operations
+
+The official Threads API is used for supported account and conversation actions implemented by the project, including publishing/replies, mentions and resolving candidate post data where available.
+
+The application does not assume access to unsupported private-message capabilities.
+
+## Content engine
+
+The content worker researches live Threads discussions around AI agents, chatbots and business automation and drafts original Russian posts.
+
+The prompt optimizes for:
+
+- a specific hook rather than generic AI hype;
+- one concrete business implication;
+- useful operational insight around leads, sales, support, appointments or CRM;
+- varied structures (contrarian observation, teardown, costly mistake, before/after process);
+- qualified inbound conversations rather than empty engagement.
+
+No system can guarantee that an individual post will become viral. The agent is instructed to optimize for relevance, specificity, saves, replies and commercial interest without fabricating claims or statistics.
 
 ## Modes
 
-- `AGENT_MODE=review` — discovers leads and creates real drafts in PostgreSQL, but does not publish.
-- `AGENT_MODE=autonomous` — publishes queued replies/content through Threads API with hourly/daily limits and per-user cooldowns.
+### `AGENT_MODE=review`
 
-Start in `review`, inspect generated outreach, then switch to `autonomous` after confirming tone and account permissions.
+Finds and qualifies real opportunities and stores outreach/content as drafts. Nothing is published automatically.
 
-## What it does
+### `AGENT_MODE=autonomous`
 
-- rotates commercial search queries in Russian/Kazakh;
-- rejects obvious competitors/self-promotion and job-seeking posts;
-- scores commercial intent, business pain, automation fit and business context;
-- generates post-specific replies instead of generic ads;
-- enforces hourly/daily caps and a per-user cooldown;
-- polls replies to its sent Threads and direct mentions;
-- follows up inside the same Threads conversation;
-- marks explicit price/demo/meeting intent as HOT and can notify the owner in Telegram;
-- generates B2B Threads content designed to expose real operational pain and produce qualified conversations;
-- provides `/healthz`, `/readyz` and a live dashboard.
+Queued replies/content may be published subject to configured rate limits and cooldowns.
 
-## Environment
+Start in `review`.
 
-See `.env.example`. Required for boot: `DATABASE_URL`, `THREADS_ACCESS_TOKEN`, `OPENAI_API_KEY`.
+## Required configuration
 
-`SEARCH_QUERIES` accepts custom phrases separated with `|`.
+```env
+DATABASE_URL=
+THREADS_ACCESS_TOKEN=
+OPENAI_API_KEY=
 
-## Verification
+SOCIALCRAWL_API_KEY=
+SOCIALCRAWL_BASE_URL=https://www.socialcrawl.dev
 
-The Docker build runs TypeScript compilation and unit tests. Railway health checking uses `/healthz`; runtime readiness including PostgreSQL + Threads identity is exposed at `/readyz`.
+AGENT_MODE=review
+HUNTER_INTERVAL_SECONDS=300
+LEAD_LOOKBACK_DAYS=7
+MIN_LEAD_SCORE=55
+MAX_OUTREACH_PER_HOUR=3
+MAX_OUTREACH_PER_DAY=10
+USER_COOLDOWN_DAYS=7
+```
+
+Optional `SEARCH_QUERIES` overrides the built-in high-intent query pack. Separate phrases with `|`.
+
+## Run and verify
+
+```bash
+npm ci
+npm run build
+npm test
+npm start
+```
+
+CI runs TypeScript compilation and tests for `main` and pull requests targeting `main`.
+
+## Safety
+
+- deduplicates seen posts and conversations;
+- applies per-user cooldowns;
+- enforces hourly/daily outreach caps;
+- supports opt-out blocking;
+- never lets location alone qualify a lead;
+- prompts the LLM not to invent prices, clients, metrics, integrations or results;
+- keeps review mode available before autonomous publishing.

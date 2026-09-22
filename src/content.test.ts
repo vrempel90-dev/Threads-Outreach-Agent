@@ -8,7 +8,7 @@ test('content slot is deterministic',()=>{
 });
 
 test('trend query rotation is deterministic',()=>{
-  assert.deepEqual(selectTrendQueries(0,2),['ChatGPT','OpenAI']);
+  assert.deepEqual(selectTrendQueries(0,2),['AI агент для бизнеса','ИИ агент для бизнеса']);
   assert.equal(selectTrendQueries(11,2).length,2);
 });
 

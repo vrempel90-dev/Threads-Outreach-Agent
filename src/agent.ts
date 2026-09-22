@@ -84,7 +84,7 @@ export class OutreachAgent {
     const query=this.config.queries[this.queryCursor++%this.config.queries.length]!;
     let posts:SocialCrawlPost[];
     try{
-      posts=await this.socialCrawl.search(query,14);
+      posts=await this.socialCrawl.search(query,this.config.leadLookbackDays);
       this.publicDiscoveryHealthy=true;
       this.discoveryIssue=posts.length?'':'NO_MATCHES_THIS_QUERY';
     }catch(e){

@@ -43,10 +43,6 @@ export function loadConfig() {
       token: optional('THREADS_ACCESS_TOKEN'),
       baseUrl: optional('THREADS_API_BASE_URL', 'https://graph.threads.net').replace(/\/$/, '')
     },
-    socialCrawl: {
-      apiKey: optional('SOCIALCRAWL_API_KEY'),
-      baseUrl: optional('SOCIALCRAWL_BASE_URL','https://www.socialcrawl.dev').replace(/\/$/,'')
-    },
     llm: {
       key: optional('OPENAI_API_KEY'),
       baseUrl: optional('OPENAI_BASE_URL', 'https://api.openai.com/v1').replace(/\/$/, ''),

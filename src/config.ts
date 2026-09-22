@@ -38,7 +38,7 @@ export function loadConfig() {
   const model=optional('OPENAI_MODEL', 'gpt-5-mini');
   return Object.freeze({
     port: int('PORT', 3000, 1, 65535),
-    databaseUrl: required('DATABASE_URL'),
+    databaseUrl: optional('DATABASE_URL'),
     threads: {
       token: optional('THREADS_ACCESS_TOKEN'),
       baseUrl: optional('THREADS_API_BASE_URL', 'https://graph.threads.net').replace(/\/$/, '')

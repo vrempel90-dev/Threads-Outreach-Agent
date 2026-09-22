@@ -84,6 +84,21 @@ Queued replies/content may be published subject to configured rate limits and co
 
 Start in `review`.
 
+
+## Railway setup mode
+
+The service can boot safely before `THREADS_ACCESS_TOKEN` and `OPENAI_API_KEY` are added.
+
+In that state:
+
+- PostgreSQL migrations and the HTTP dashboard can start;
+- `/healthz` remains available for infrastructure health checks;
+- `/readyz` returns `503` with a `missing` list until the required API keys are present;
+- hunter, inbound, content and publishing loops do not run;
+- `AGENT_MODE=review` should remain enabled until the first real lead and reply tests are verified.
+
+This allows Railway infrastructure to be prepared first and secrets to be added later without using fake credentials.
+
 ## Required configuration
 
 ```env

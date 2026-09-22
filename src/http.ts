@@ -20,8 +20,13 @@ export function createHttp(agent:OutreachAgent){
       if(url.pathname==='/healthz'){json(res,200,{ok:true});return;}
       if(url.pathname==='/readyz'){
         const db=await agent.db.health();
-        let threads=false;try{await agent.threads.profile();threads=true}catch{}
-        json(res,db&&threads?200:503,{ready:db&&threads,db,threads,mode:agent.config.mode});return;
+        const configured=Boolean(agent.config.threads.token&&agent.config.llm.key);
+        let threads=false;
+        if(agent.config.threads.token){try{await agent.threads.profile();threads=true}catch{}}
+        json(res,db&&configured&&threads?200:503,{ready:db&&configured&&threads,db,configured,threads,mode:agent.config.mode,missing:[
+          ...(!agent.config.threads.token?['THREADS_ACCESS_TOKEN']:[]),
+          ...(!agent.config.llm.key?['OPENAI_API_KEY']:[])
+        ]});return;
       }
       if(url.pathname==='/'){
         const [counts,leads]=await Promise.all([agent.db.counts(),agent.db.listDashboardLeads(30)]);

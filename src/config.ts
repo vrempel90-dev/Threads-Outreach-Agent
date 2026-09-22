@@ -40,7 +40,7 @@ export function loadConfig() {
     port: int('PORT', 3000, 1, 65535),
     databaseUrl: required('DATABASE_URL'),
     threads: {
-      token: required('THREADS_ACCESS_TOKEN'),
+      token: optional('THREADS_ACCESS_TOKEN'),
       baseUrl: optional('THREADS_API_BASE_URL', 'https://graph.threads.net').replace(/\/$/, '')
     },
     socialCrawl: {
@@ -48,7 +48,7 @@ export function loadConfig() {
       baseUrl: optional('SOCIALCRAWL_BASE_URL','https://www.socialcrawl.dev').replace(/\/$/,'')
     },
     llm: {
-      key: required('OPENAI_API_KEY'),
+      key: optional('OPENAI_API_KEY'),
       baseUrl: optional('OPENAI_BASE_URL', 'https://api.openai.com/v1').replace(/\/$/, ''),
       model,
       webSearchModel: optional('OPENAI_WEB_SEARCH_MODEL', model)

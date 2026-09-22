@@ -68,12 +68,12 @@ export function createHttp(agent:OutreachAgent){
           <section class="panel"><h2>Найденные лиды</h2><div class="small">Показываются только лиды, подтверждённые AI как потенциальные покупатели. Обновление страницы — раз в 60 секунд.</div>
             <div class="table-wrap"><table><thead><tr><th>Threads</th><th>Стадия</th><th>Score</th><th>AI оценка</th><th>Сигнал</th><th>Пост</th><th>Обновлён</th></tr></thead><tbody>${rows||empty}</tbody></table></div>
           </section>
-          <section class="panel small">Inbound: ${esc(agent.lastInboundAt??'—')} · Content: ${esc(agent.lastContentAt??'—')} · Search credits: ${esc(agent.socialCrawl.lastCreditsRemaining??'—')} · Last error: ${esc(agent.lastError??'—')}</section>
+          <section class="panel small">Inbound: ${esc(agent.lastInboundAt??'—')} · Content: ${esc(agent.lastContentAt??'—')} · Last error: ${esc(agent.lastError??'—')}</section>
         </main><script>for(const el of document.querySelectorAll('time[datetime]')){const d=new Date(el.getAttribute('datetime'));if(!Number.isNaN(d.getTime()))el.textContent=d.toLocaleString();}</script></body></html>`);
         return;
       }
       if(url.pathname.startsWith('/api/')&&!authorized(req,agent.config.dashboardToken)){json(res,401,{error:'unauthorized'});return;}
-      if(url.pathname==='/api/status'){json(res,200,{mode:agent.config.mode,username:agent.ownUsername,discoverySource:agent.discoverySource,lastHunterAt:agent.lastHunterAt,lastInboundAt:agent.lastInboundAt,lastContentAt:agent.lastContentAt,lastError:agent.lastError,publicDiscoveryHealthy:agent.publicDiscoveryHealthy,discoveryIssue:agent.discoveryIssue,searchCreditsRemaining:agent.socialCrawl.lastCreditsRemaining,counts:await agent.db.counts()});return;}
+      if(url.pathname==='/api/status'){json(res,200,{mode:agent.config.mode,username:agent.ownUsername,discoverySource:agent.discoverySource,lastHunterAt:agent.lastHunterAt,lastInboundAt:agent.lastInboundAt,lastContentAt:agent.lastContentAt,lastError:agent.lastError,publicDiscoveryHealthy:agent.publicDiscoveryHealthy,discoveryIssue:agent.discoveryIssue,counts:await agent.db.counts()});return;}
       if(url.pathname==='/api/leads'){json(res,200,{data:await agent.db.listLeads()});return;}
       if(url.pathname==='/api/outreach'){json(res,200,{data:await agent.db.listOutreach()});return;}
       if(req.method==='POST'&&url.pathname==='/api/run-hunter'){await agent.hunterOnce();json(res,200,{ok:true});return;}

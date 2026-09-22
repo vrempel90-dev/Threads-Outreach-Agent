@@ -4,7 +4,7 @@ import { ThreadsClient } from './threads.js';
 import { LlmClient } from './llm.js';
 import { OwnerNotifier } from './notifier.js';
 import { scorePost,isHotIntent,isOptOut } from './scoring.js';
-import { contentSlot, selectTrendQueries, formatTrendEvidence, type TrendEvidence } from './content.js';
+import { contentSlot, selectTrendQueries, formatTrendEvidence, evergreenTheme, type TrendEvidence } from './content.js';
 import type { ThreadsPost } from './types.js';
 
 const sleep=(ms:number,signal:AbortSignal)=>new Promise<void>(resolve=>{if(signal.aborted)return resolve();const t=setTimeout(done,ms);function done(){clearTimeout(t);signal.removeEventListener('abort',done);resolve()}signal.addEventListener('abort',done,{once:true})});
@@ -209,25 +209,37 @@ export class OutreachAgent {
     catch(e){console.error(JSON.stringify({level:'error',event:'trend_threads_api_failed',code:e instanceof Error?e.message:'UNKNOWN'}));return;}
 
     const queries=new Set(evidence.map(x=>x.query)).size;
-    if(evidence.length<6||queries<2){
-      console.log(JSON.stringify({level:'info',event:'viral_retry_weak_evidence',slot,evidence:evidence.length,queries,retryMinutes:20}));
-      return;
-    }
 
     try{
-      const evidenceText=formatTrendEvidence(evidence).slice(0,14000);
-      const draft=await this.llm.viralContent(evidenceText);
-      if(draft.confidence<70){
-        console.log(JSON.stringify({level:'info',event:'viral_retry_low_confidence',slot,theme:draft.theme,confidence:draft.confidence,retryMinutes:20}));
+      const hasLiveEvidence=evidence.length>=6&&queries>=2;
+      const evidenceText=hasLiveEvidence?formatTrendEvidence(evidence).slice(0,14000):'';
+      const draft=hasLiveEvidence
+        ? await this.llm.viralContent(evidenceText)
+        : await this.llm.expertContent(evergreenTheme(slot));
+
+      const minimumConfidence=hasLiveEvidence?70:75;
+      if(draft.confidence<minimumConfidence){
+        console.log(JSON.stringify({level:'info',event:'content_retry_low_confidence',slot,source:hasLiveEvidence?'threads_trends':'evergreen',theme:draft.theme,confidence:draft.confidence,retryMinutes:20}));
         return;
       }
-      await this.db.createOutreach({kind:'CONTENT',sourceText:evidenceText,text:draft.text,score:draft.confidence,status:this.config.mode==='autonomous'?'QUEUED':'DRAFT'});
+
+      await this.db.createOutreach({
+        kind:'CONTENT',
+        sourceText:hasLiveEvidence?evidenceText:`EVERGREEN_THEME: ${evergreenTheme(slot)}`,
+        text:draft.text,
+        score:draft.confidence,
+        status:this.config.mode==='autonomous'?'QUEUED':'DRAFT'
+      });
       await this.db.setState('content_slot',slot);
       this.nextContentAttemptAt=0;
       this.lastContentAt=new Date().toISOString();
-      console.log(JSON.stringify({level:'info',event:'viral_content_drafted',slot,theme:draft.theme,confidence:draft.confidence,evidence:evidence.length,mode:this.config.mode}));
+      console.log(JSON.stringify({
+        level:'info',event:'content_drafted',slot,
+        source:hasLiveEvidence?'threads_trends':'evergreen',
+        theme:draft.theme,confidence:draft.confidence,evidence:evidence.length,mode:this.config.mode
+      }));
     }catch(e){
-      console.error(JSON.stringify({level:'error',event:'viral_content_failed',slot,code:e instanceof Error?e.message:'UNKNOWN',retryMinutes:20}));
+      console.error(JSON.stringify({level:'error',event:'content_failed',slot,code:e instanceof Error?e.message:'UNKNOWN',retryMinutes:20}));
     }
   }
 }

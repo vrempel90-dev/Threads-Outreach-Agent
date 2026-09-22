@@ -14,9 +14,21 @@ const int = (key: string, fallback: number, min: number, max: number): number =>
 };
 
 export const DEFAULT_SEARCH_QUERIES = [
-  'нужен чат бот','нужен AI агент','нужен ИИ агент','ищу разработчика чат бота',
-  'AI агент','ИИ агент','автоматизация бизнеса','автоматизация заявок','теряем заявки',
-  'автоматизация CRM','AI бизнес','әзірлеуші керек','автоматтандыру керек'
+  // Direct buyer demand — RU
+  'нужен чат бот','нужен чат-бот','нужен AI агент','нужен ИИ агент',
+  'ищу разработчика чат бота','ищу разработчика AI агента','ищу разработчика ИИ агента',
+  'кто сделает чат бота','кто разработает AI агента','заказать чат бота',
+  'бот для WhatsApp бизнес','бот для Telegram бизнес','бот для Instagram Direct',
+  'AI администратор для бизнеса','ИИ администратор для бизнеса',
+  'AI для отдела продаж','AI для поддержки клиентов','AI для обработки заявок',
+  'автоматизировать заявки','автоматизация отдела продаж','автоматизация поддержки клиентов',
+  'автоматизация записи клиентов','автоматизация CRM','интеграция CRM с AI',
+  'теряем заявки автоматизация','медленно отвечаем клиентам автоматизация',
+  // Direct buyer demand — KZ
+  'чат бот керек','AI агент керек','ИИ агент керек','ЖИ агент керек',
+  'бизнеске чат бот керек','бизнеске AI агент керек','әзірлеуші керек чат бот',
+  'бизнесті автоматтандыру керек','өтінімдерді автоматтандыру','сатуды автоматтандыру',
+  'клиенттерге жауап беретін бот','WhatsApp бот керек','Telegram бот керек'
 ] as const;
 
 export function loadConfig() {
@@ -42,7 +54,8 @@ export function loadConfig() {
       webSearchModel: optional('OPENAI_WEB_SEARCH_MODEL', model)
     },
     mode: modeRaw as AgentMode,
-    hunterIntervalMs: int('HUNTER_INTERVAL_SECONDS', 3600, 60, 3600) * 1000,
+    hunterIntervalMs: int('HUNTER_INTERVAL_SECONDS', 300, 60, 3600) * 1000,
+    leadLookbackDays: int('LEAD_LOOKBACK_DAYS', 7, 1, 30),
     inboundIntervalMs: int('INBOUND_INTERVAL_SECONDS', 90, 60, 3600) * 1000,
     contentIntervalMs: int('CONTENT_INTERVAL_HOURS', 4, 1, 24) * 3600_000,
     trendQueriesPerCycle: int('TREND_QUERIES_PER_CYCLE', 2, 1, 4),

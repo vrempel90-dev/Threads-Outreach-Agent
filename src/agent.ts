@@ -34,6 +34,15 @@ export class OutreachAgent {
   ){}
 
   async start(signal:AbortSignal){
+    const missing:string[]=[];
+    if(!this.config.threads.token) missing.push('THREADS_ACCESS_TOKEN');
+    if(!this.config.llm.key) missing.push('OPENAI_API_KEY');
+    if(missing.length){
+      this.publicDiscoveryHealthy=false;
+      this.discoveryIssue='SETUP_PENDING_'+missing.join(',');
+      console.warn(JSON.stringify({level:'warn',event:'setup_pending',missing}));
+      return;
+    }
     const p=await this.threads.profile(); this.ownUsername=p.username.toLowerCase();
     await this.db.setState('threads_username',p.username);
     const scopes=await this.threads.debugScopes();

@@ -186,6 +186,31 @@ Use confidence 0-100. Keep reason under 120 characters.`;
     const reply=typeof out?.reply==='string'?out.reply.trim():''; if(!reply||[...reply].length>450) throw new Error('LLM_BAD_REPLY'); return reply;
   }
 
+  async expertContent(theme:string):Promise<ViralDraft>{
+    const system=`You are a Threads editor for a specialist who builds AI agents, chatbots and business automations. Write ONE original Russian post based only on the supplied theme.
+
+Return exactly JSON {"text":"...","theme":"...","confidence":0}.
+
+Rules:
+- text MUST be 220-430 characters, never above 450;
+- confidence is writing-quality confidence, 0-100;
+- do not invent news, statistics, clients, revenue, prices, integrations or results;
+- no fake personal experience or fabricated case study;
+- make the first line concrete and scroll-stopping without clickbait;
+- give one practical business insight involving leads, sales, support, appointments, CRM or repetitive work;
+- end with either one sharp question OR one low-pressure invitation, never both;
+- avoid generic AI hype and phrases like "AI will change everything";
+- optimize for saves, replies and qualified inbound interest, but never claim virality.`;
+
+    const out=await this.complete(system,`THEME:\n${theme}`);
+    const text=typeof out?.text==='string'?out.text.trim():'';
+    const draftTheme=typeof out?.theme==='string'?out.theme.trim():theme;
+    const confidence=Math.max(0,Math.min(100,Math.round(Number(out?.confidence)||0)));
+    const len=[...text].length;
+    if(!text||len<80||len>450)throw new Error('LLM_BAD_EXPERT_DRAFT');
+    return {text,theme:draftTheme||theme,confidence};
+  }
+
   async viralContent(evidence:string):Promise<ViralDraft>{
     const system=`You are a real-time Threads editor for a specialist who builds AI agents, chatbots and business automations. You receive live evidence collected from public Threads posts. Infer ONE topic that is genuinely active now, then write an ORIGINAL Russian Threads post connecting it to a concrete business implication.
 

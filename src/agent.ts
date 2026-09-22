@@ -2,14 +2,12 @@ import type { Config } from './config.js';
 import { Database } from './db.js';
 import { ThreadsClient } from './threads.js';
 import { LlmClient } from './llm.js';
-import { SocialCrawlClient, type SocialCrawlPost } from './socialcrawl.js';
 import { OwnerNotifier } from './notifier.js';
 import { scorePost,isHotIntent,isOptOut } from './scoring.js';
 import { contentSlot, selectTrendQueries, formatTrendEvidence, type TrendEvidence } from './content.js';
 import type { ThreadsPost } from './types.js';
 
 const sleep=(ms:number,signal:AbortSignal)=>new Promise<void>(resolve=>{if(signal.aborted)return resolve();const t=setTimeout(done,ms);function done(){clearTimeout(t);signal.removeEventListener('abort',done);resolve()}signal.addEventListener('abort',done,{once:true})});
-const virality=(p:SocialCrawlPost)=>p.likes+p.replies*2+p.shares*3+p.reposts*3+p.quotes*3;
 
 export class OutreachAgent {
   private queryCursor=0;
@@ -21,7 +19,7 @@ export class OutreachAgent {
   lastError:string|null=null;
   publicDiscoveryHealthy:boolean|null=null;
   discoveryIssue:string|null=null;
-  discoverySource='socialcrawl_threads_search';
+  discoverySource='threads_keyword_search';
   private nextContentAttemptAt=0;
 
   constructor(
@@ -29,7 +27,6 @@ export class OutreachAgent {
     readonly db:Database,
     readonly threads:ThreadsClient,
     readonly llm:LlmClient,
-    readonly socialCrawl:SocialCrawlClient,
     readonly notifier:OwnerNotifier
   ){}
 
@@ -49,11 +46,6 @@ export class OutreachAgent {
     if(scopes){
       const threadScopes=scopes.filter(s=>s.startsWith('threads_')).sort();
       console.log(JSON.stringify({level:'info',event:'threads_token_scopes',scopes:threadScopes}));
-    }
-    if(!this.socialCrawl.enabled){
-      this.publicDiscoveryHealthy=false;
-      this.discoveryIssue='SOCIALCRAWL_API_KEY_REQUIRED';
-      console.warn(JSON.stringify({level:'warn',event:'socialcrawl_not_configured'}));
     }
     if(await this.db.getState('legacy_seen_release_v1')!=='done'){
       const released=await this.db.releaseLegacySeen();
@@ -83,80 +75,58 @@ export class OutreachAgent {
   private allowedByRate(username:string){return Promise.all([this.db.sentCount(1),this.db.sentCount(24),this.db.recentContact(username,this.config.userCooldownDays)]).then(([hour,day,recent])=>!recent&&hour<this.config.maxPerHour&&day<this.config.maxPerDay);}
 
   async hunterOnce(){
-    if(!this.socialCrawl.enabled){
-      this.publicDiscoveryHealthy=false;
-      this.discoveryIssue='SOCIALCRAWL_API_KEY_REQUIRED';
-      this.lastHunterAt=new Date().toISOString();
-      console.warn(JSON.stringify({level:'warn',event:'hunter_skipped',reason:this.discoveryIssue}));
-      return;
-    }
     const query=this.config.queries[this.queryCursor++%this.config.queries.length]!;
-    let posts:SocialCrawlPost[];
+    let posts:ThreadsPost[];
     try{
-      posts=await this.socialCrawl.search(query,this.config.leadLookbackDays);
+      const raw=await this.threads.search(query,'RECENT',50);
+      const cutoff=Date.now()-this.config.leadLookbackDays*24*3600_000;
+      posts=raw.filter(post=>{
+        const ts=Date.parse(post.timestamp);
+        return !Number.isNaN(ts)&&ts>=cutoff;
+      });
       this.publicDiscoveryHealthy=true;
       this.discoveryIssue=posts.length?'':'NO_MATCHES_THIS_QUERY';
     }catch(e){
       this.publicDiscoveryHealthy=false;
-      this.discoveryIssue=e instanceof Error?e.message:'SOCIALCRAWL_FAILED';
+      this.discoveryIssue=e instanceof Error?e.message:'THREADS_KEYWORD_SEARCH_FAILED';
+      this.lastHunterAt=new Date().toISOString();
       throw e;
     }
 
-    let candidates=0,drafted=0,resolved=0,discoveredOnly=0;
+    let candidates=0,drafted=0;
     for(const post of posts){
       if(post.username.toLowerCase()===this.ownUsername||await this.db.seen(post.id))continue;
       await this.db.markSeen(post.id);
       if(await this.db.blocked(post.username))continue;
+
       const scored=scorePost(post.text,this.config.minLeadScore);
-      console.log(JSON.stringify({level:'info',event:'lead_score',query,username:post.username,score:scored.score,reasons:scored.reasons,relevance:post.relevance,engagement:{likes:post.likes,replies:post.replies,shares:post.shares,reposts:post.reposts,quotes:post.quotes}}));
+      console.log(JSON.stringify({level:'info',event:'lead_score',source:'threads_api',query,username:post.username,score:scored.score,reasons:scored.reasons}));
       if(!scored.shouldEngage)continue;
+
       const qualified=await this.llm.qualifyLead(post.text,post.username,query);
       console.log(JSON.stringify({level:'info',event:'lead_qualification',query,username:post.username,buyer:qualified.buyer,confidence:qualified.confidence,category:qualified.category,reason:qualified.reason}));
       if(!qualified.buyer)continue;
       candidates++;
 
-      const official=await this.threads.resolveCandidate(post.id,post.permalink);
-      const sourcePostId=official?.id??post.id;
-      const permalink=official?.permalink||post.permalink;
-      const username=official?.username||post.username;
-      const text=official?.text||post.text;
-
-      let replyTargetVerified=Boolean(official);
-      if(!replyTargetVerified){
-        const directState=await this.db.getState('socialcrawl_reply_ids');
-        if(directState==='supported'){
-          replyTargetVerified=true;
-        }else{
-          try{
-            const probeId=await this.threads.probeReplyTarget(sourcePostId);
-            replyTargetVerified=true;
-            await this.db.setState('socialcrawl_reply_ids','supported');
-            console.log(JSON.stringify({level:'info',event:'direct_reply_probe_success',username,sourcePostId,probeId}));
-          }catch(e){
-            const code=e instanceof Error?e.message:'DIRECT_REPLY_PROBE_FAILED';
-            await this.db.setState('socialcrawl_reply_ids',`unsupported:${code}`);
-            console.warn(JSON.stringify({level:'warn',event:'direct_reply_probe_failed',username,sourcePostId,code}));
-          }
-        }
-      }
-
       await this.db.upsertLead({
-        username,score:scored.score,stage:scored.score>=80?'QUALIFIED':'WARM',
-        sourcePostId,sourcePermalink:permalink,lastMessage:text,
+        username:post.username,score:scored.score,stage:scored.score>=80?'QUALIFIED':'WARM',
+        sourcePostId:post.id,sourcePermalink:post.permalink,lastMessage:post.text,
         searchQuery:query,aiCategory:qualified.category,aiConfidence:qualified.confidence,aiReason:qualified.reason,
-        officiallyResolved:replyTargetVerified
+        officiallyResolved:true
       });
-      console.log(JSON.stringify({level:'info',event:'lead_found',source:'socialcrawl',query,username,score:scored.score,officiallyResolved:replyTargetVerified,permalink}));
+      console.log(JSON.stringify({level:'info',event:'lead_found',source:'threads_api',query,username:post.username,score:scored.score,permalink:post.permalink}));
 
-      if(!replyTargetVerified){discoveredOnly++;continue;}
-      resolved++;
-      if(!await this.allowedByRate(username))continue;
-      const reply=await this.llm.outreach(text,scored.language);
-      await this.db.createOutreach({kind:'REPLY',username,sourcePostId,sourcePermalink:permalink,sourceText:text,text:reply,score:scored.score,status:this.config.mode==='autonomous'?'QUEUED':'DRAFT'});
+      if(!await this.allowedByRate(post.username))continue;
+      const reply=await this.llm.outreach(post.text,scored.language);
+      await this.db.createOutreach({
+        kind:'REPLY',username:post.username,sourcePostId:post.id,sourcePermalink:post.permalink,
+        sourceText:post.text,text:reply,score:scored.score,status:this.config.mode==='autonomous'?'QUEUED':'DRAFT'
+      });
       drafted++;
     }
+
     this.lastHunterAt=new Date().toISOString();
-    console.log(JSON.stringify({level:'info',event:'hunter_cycle',source:'socialcrawl',query,posts:posts.length,candidates,resolved,discoveredOnly,drafted,creditsRemaining:this.socialCrawl.lastCreditsRemaining,mode:this.config.mode}));
+    console.log(JSON.stringify({level:'info',event:'hunter_cycle',source:'threads_api',query,posts:posts.length,candidates,drafted,mode:this.config.mode}));
   }
 
   private async handleInbound(post:ThreadsPost,parentId:string,context:string){
@@ -200,27 +170,30 @@ export class OutreachAgent {
   }
 
   private async collectTrendEvidence():Promise<TrendEvidence[]>{
-    if(!this.socialCrawl.enabled)return [];
     const queries=selectTrendQueries(this.trendCursor,this.config.trendQueriesPerCycle);
     this.trendCursor=(this.trendCursor+this.config.trendQueriesPerCycle)%16;
+
     const groups=await Promise.all(queries.map(async query=>{
-      const posts=await this.socialCrawl.search(query,7);
-      return posts
-        .filter(p=>p.username.toLowerCase()!==this.ownUsername)
-        .sort((a,b)=>virality(b)-virality(a))
-        .slice(0,8)
-        .map((p,idx):TrendEvidence=>({
-          query,type:'TOP',rank:idx+1,
-          text:`[likes=${p.likes} replies=${p.replies} shares=${p.shares} reposts=${p.reposts} quotes=${p.quotes}] ${p.text}`,
-          username:p.username,timestamp:p.timestamp,permalink:p.permalink
+      const [top,recent]=await Promise.all([
+        this.threads.search(query,'TOP',12),
+        this.threads.search(query,'RECENT',12)
+      ]);
+      const mapRows=(rows:ThreadsPost[],type:'TOP'|'RECENT'):TrendEvidence[]=>rows
+        .filter(p=>p.username.toLowerCase()!==this.ownUsername&&Boolean(p.text.trim()))
+        .map((p,idx)=>({
+          query,type,rank:idx+1,text:p.text,username:p.username,timestamp:p.timestamp,permalink:p.permalink
         }));
+      return [...mapRows(top,'TOP'),...mapRows(recent,'RECENT')];
     }));
+
     const seen=new Set<string>(),out:TrendEvidence[]=[];
     for(const row of groups.flat()){
-      if(!row.text.trim()||seen.has(row.permalink))continue;
-      seen.add(row.permalink);out.push(row);
+      const key=row.permalink||`${row.username}:${row.timestamp}:${row.text.slice(0,80)}`;
+      if(seen.has(key))continue;
+      seen.add(key);
+      out.push(row);
     }
-    console.log(JSON.stringify({level:'info',event:'trend_socialcrawl',queries:queries.length,evidence:out.length,creditsRemaining:this.socialCrawl.lastCreditsRemaining}));
+    console.log(JSON.stringify({level:'info',event:'trend_threads_api',queries:queries.length,evidence:out.length}));
     return out;
   }
 
@@ -231,14 +204,9 @@ export class OutreachAgent {
     if(Date.now()<this.nextContentAttemptAt)return;
     this.nextContentAttemptAt=Date.now()+20*60_000;
 
-    if(!this.socialCrawl.enabled){
-      console.warn(JSON.stringify({level:'warn',event:'content_skipped',reason:'SOCIALCRAWL_API_KEY_REQUIRED'}));
-      return;
-    }
-
     let evidence:TrendEvidence[];
     try{evidence=await this.collectTrendEvidence();}
-    catch(e){console.error(JSON.stringify({level:'error',event:'trend_socialcrawl_failed',code:e instanceof Error?e.message:'UNKNOWN'}));return;}
+    catch(e){console.error(JSON.stringify({level:'error',event:'trend_threads_api_failed',code:e instanceof Error?e.message:'UNKNOWN'}));return;}
 
     const queries=new Set(evidence.map(x=>x.query)).size;
     if(evidence.length<6||queries<2){

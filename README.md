@@ -16,7 +16,7 @@ The project is designed to find **buyer intent**, not merely posts mentioning AI
 
 ## Lead discovery
 
-Public Threads discovery is performed through **SocialCrawl Threads search** when `SOCIALCRAWL_API_KEY` is configured.
+Public Threads discovery is performed through the **official Meta Threads API keyword search** using `THREADS_ACCESS_TOKEN`.
 
 The default search pack contains Russian and Kazakh high-intent phrases such as:
 
@@ -54,13 +54,13 @@ The LLM then performs a second strict buyer/seller/job/general classification.
 
 ## Threads operations
 
-The official Threads API is used for supported account and conversation actions implemented by the project, including publishing/replies, mentions and resolving candidate post data where available.
+The official Meta Threads API is used for keyword search, publishing/replies, mentions and other supported account/conversation actions implemented by the project.
 
 The application does not assume access to unsupported private-message capabilities.
 
 ## Content engine
 
-The content worker researches live Threads discussions around AI agents, chatbots and business automation and drafts original Russian posts.
+The content worker uses official Threads keyword search (`TOP` and `RECENT`) to research live discussions around AI agents, chatbots and business automation and drafts original Russian posts.
 
 The prompt optimizes for:
 
@@ -97,7 +97,7 @@ In that state:
 - hunter, inbound, content and publishing loops do not run;
 - `AGENT_MODE=review` should remain enabled until the first real lead and reply tests are verified.
 
-This allows Railway infrastructure to be prepared first and secrets to be added later without using fake credentials.
+This allows Railway infrastructure to be prepared first and secrets to be added later without using fake credentials. SocialCrawl is not required.
 
 ## Required configuration
 
@@ -106,8 +106,6 @@ DATABASE_URL=
 THREADS_ACCESS_TOKEN=
 OPENAI_API_KEY=
 
-SOCIALCRAWL_API_KEY=
-SOCIALCRAWL_BASE_URL=https://www.socialcrawl.dev
 
 AGENT_MODE=review
 HUNTER_INTERVAL_SECONDS=300

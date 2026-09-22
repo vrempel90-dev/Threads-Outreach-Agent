@@ -160,10 +160,11 @@ Rules:
   async qualifyLead(postText:string,username:string,query:string):Promise<LeadQualification>{
     const system=`You are a strict B2B lead qualification classifier for a developer who sells AI agents, chatbots and business automation. Return JSON only: {"buyer":true,"confidence":0,"category":"buyer","reason":"..."}. Categories: buyer, seller, job, general, unclear.
 
-A buyer is someone plausibly asking for an AI/software solution/provider, comparing AI/chatbot/automation options, describing a concrete operational pain that can reasonably be solved with software automation, or showing intent to automate their own business.
-The demand MUST be relevant to AI agents, chatbots, CRM/workflow automation, lead handling, support automation, appointment automation or sales automation.
+A buyer is someone plausibly asking for a provider or solution for an AI agent, chatbot, AI assistant, AI administrator, CRM/workflow automation, lead handling, support automation, appointment automation or sales automation; OR describing a concrete operational pain and explicitly wanting to automate it.
+Prioritize direct commercial signals such as "нужен", "ищу", "кто сделает", "сколько стоит", "хотим внедрить", "керек", "бағасы".
 Reject human-service professions that merely use the word "agent" (real-estate agent, travel agent, insurance agent, talent agent, etc.), sellers/agencies/developers promoting their own AI or automation services, recruiters/job-seekers, generic educational/news posts, engagement bait, and vague mentions with no buying or operational intent.
-Do not infer buyer intent merely because the post contains AI, automation, CRM, chatbot, business, or developer keywords.
+A post from Kazakhstan/CIS is strategically relevant, but location alone NEVER makes it a buyer.
+Do not infer buyer intent merely because the post contains AI, automation, CRM, chatbot, business, developer, sales or lead keywords.
 Use confidence 0-100. Keep reason under 120 characters.`;
     const out=await this.complete(system,`SEARCH QUERY: ${query}\nUSERNAME: @${username}\nPOST:\n${postText}`);
     const category=String(out?.category??'unclear') as LeadQualification['category'];
@@ -191,12 +192,16 @@ Use confidence 0-100. Keep reason under 120 characters.`;
 Return exactly JSON {"text":"...","theme":"...","confidence":0}.
 
 Hard rules:
-- text MUST be 350-430 characters, never above 450;
+- text MUST be 280-430 characters, never above 450;
 - confidence is 0-100 and reflects evidence strength;
 - never invent news, launches, statistics, clients, revenue, prices or results;
 - never copy or closely paraphrase source posts;
-- no generic motivational AI hype;
-- strong first line, one concrete business insight, one concise question at the end;
+- no generic motivational AI hype, "AI will change everything", or empty engagement bait;
+- first line must create a specific curiosity gap, tension, mistake, cost, or counterintuitive observation grounded in the evidence;
+- make the body useful to a business owner: show one concrete operational implication involving leads, sales, support, appointments, CRM or repetitive work;
+- end with either one sharp question OR one low-pressure invitation to discuss the process; never use both;
+- vary structures across posts: contrarian observation, mini teardown, costly mistake, before/after process, practical checklist insight;
+- do not claim a post will go viral; optimize for relevance, specificity, saves, replies and qualified inbound interest;
 - if evidence is weak or conflicting, confidence must be below 70.`;
 
     const parseDraft=(out:any):ViralDraft|null=>{
